@@ -6,6 +6,9 @@
 #include <webgpu-utils/webgpu-utils.h>
 
 #include <iostream>
+#include <fstream>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 using namespace wgpu;
 
@@ -16,8 +19,9 @@ namespace tinyrender {
 	static Device m_device;
 	static Queue m_queue;
 	static Surface m_surface;
+	static ShaderModule m_shader;
 
-	static TextureView GetNextSurfaceTextureView() {
+	static TextureView _internalNextSurfaceTextureView() {
 		SurfaceTexture surfaceTexture;
 		m_surface.getCurrentTexture(&surfaceTexture);
 		if (surfaceTexture.status != SurfaceGetCurrentTextureStatus::Success) {
@@ -39,6 +43,54 @@ namespace tinyrender {
 		wgpuTextureRelease(surfaceTexture.texture);
 
 		return targetView;
+	}
+
+	static ShaderModule _internalLoadShaderModule(const fs::path& path, Device device) {
+		std::ifstream file(path);
+		if (!file.is_open()) {
+			return nullptr;
+		}
+		file.seekg(0, std::ios::end);
+		size_t size = file.tellg();
+		std::string shaderSource(size, ' ');
+		file.seekg(0);
+		file.read(shaderSource.data(), size);
+
+		ShaderModuleWGSLDescriptor shaderCodeDesc;
+		shaderCodeDesc.chain.next = nullptr;
+		shaderCodeDesc.chain.sType = SType::ShaderModuleWGSLDescriptor;
+		shaderCodeDesc.code = shaderSource.c_str();
+		ShaderModuleDescriptor shaderDesc;
+		shaderDesc.nextInChain = &shaderCodeDesc.chain;
+
+		return device.createShaderModule(shaderDesc);
+	}
+
+	static int _internalCreateObject(const object& obj) {
+		// Vertex fetch
+		std::vector<VertexAttribute> vertexAttribs(2);
+
+		// Vertex
+		vertexAttribs[0].shaderLocation = 0;
+		vertexAttribs[0].format = VertexFormat::Float32x3;
+		vertexAttribs[0].offset = 0;
+
+		// Normal
+		vertexAttribs[1].shaderLocation = 1;
+		vertexAttribs[1].format = VertexFormat::Float32x3;
+		vertexAttribs[1].offset = 3 * sizeof(float);
+
+		// Colors
+		// TODO
+
+		// Triangle
+		VertexBufferLayout vertexBufferLayout;
+		vertexBufferLayout.attributeCount = (uint32_t)vertexAttribs.size();
+		vertexBufferLayout.attributes = vertexAttribs.data();
+		vertexBufferLayout.arrayStride = 6 * sizeof(float);
+		vertexBufferLayout.stepMode = VertexStepMode::Vertex;
+
+		return 0;
 	}
 
 
@@ -140,6 +192,13 @@ namespace tinyrender {
 		// Release the adapter only after it has been fully utilized
 		adapter.release();
 
+		// Shader
+		m_shader = _internalLoadShaderModule(RESOURCES_DIR + std::string("/shader.wgsl"), m_device);
+
+		// Render pipeline
+		RenderPipelineDescriptor pipelineDesc;
+		// Next step is here: https://github.com/eliemichel/LearnWebGPU-Code/blob/step050/main.cpp
+
 		return true;
 	}
 	
@@ -153,7 +212,7 @@ namespace tinyrender {
 	
 	void render() {
 		// Get the next target texture view
-		TextureView targetView = GetNextSurfaceTextureView();
+		TextureView targetView = _internalNextSurfaceTextureView();
 		if (!targetView) return;
 
 		// Create a command encoder for the draw call
@@ -210,7 +269,8 @@ namespace tinyrender {
 	}
 
 
-	int addObject(const object& /*obj*/) {
+	int addObject(const object& obj) {
+		_internalCreateObject(obj);
 		return 0;
 	}
 	
