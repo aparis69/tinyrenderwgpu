@@ -8,5 +8,3 @@ include(cmake/utils.cmake)
 include(cmake/glfw.cmake)
 
 add_subdirectory(src)
-
-set_property(TARGET libprotobuf-mutator PROPERTY FOLDER "third_party")

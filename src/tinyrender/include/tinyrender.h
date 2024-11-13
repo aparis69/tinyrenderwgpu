@@ -1,8 +1,9 @@
-#include <webgpu/webgpu_cpp.h>
+#pragma once 
+
 #include <GLFW/glfw3.h>
 #include <glfw3webgpu/glfw3webgpu.h>
-
 #include <glm/glm.hpp>
+#include <vector>
 
 namespace tinyrender {
 
@@ -19,7 +20,7 @@ namespace tinyrender {
 	};
 
 	// Windowing
-	void init(const char* windowName = "tinyrender", int width = -1, int height = -1);
+	bool init(const char* windowName = "tinyrender", int width = -1, int height = -1);
 	bool shouldQuit();
 	void update();
 	void render();

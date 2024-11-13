@@ -15,6 +15,7 @@ target_link_libraries(TinyRender
 	webgpu
 	glfw3webgpu
 	glm_static
+	webgpu-utils
 )
 
 target_include_directories(TinyRender INTERFACE tinyrender ./include/)
