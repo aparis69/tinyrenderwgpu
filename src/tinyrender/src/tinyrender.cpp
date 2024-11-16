@@ -19,7 +19,15 @@ namespace tinyrender {
 	static Device m_device;
 	static Queue m_queue;
 	static Surface m_surface;
+	static SwapChain m_swapChain;
+
 	static ShaderModule m_shader;
+	static RenderPipeline m_renderPipeline;
+
+	struct VertexAttributes {
+		glm::vec3 vertex;
+		glm::vec3 normal;
+	};
 
 	static TextureView _internalNextSurfaceTextureView() {
 		SurfaceTexture surfaceTexture;
@@ -67,6 +75,10 @@ namespace tinyrender {
 	}
 
 	static int _internalCreateObject(const object& obj) {
+		return 0;
+	}
+
+	static void _internalSetupRenderPipeline() {
 		// Vertex fetch
 		std::vector<VertexAttribute> vertexAttribs(2);
 
@@ -78,21 +90,86 @@ namespace tinyrender {
 		// Normal
 		vertexAttribs[1].shaderLocation = 1;
 		vertexAttribs[1].format = VertexFormat::Float32x3;
-		vertexAttribs[1].offset = 3 * sizeof(float);
+		vertexAttribs[1].offset = offsetof(VertexAttributes, normal);
 
-		// Colors
-		// TODO
-
-		// Triangle
 		VertexBufferLayout vertexBufferLayout;
 		vertexBufferLayout.attributeCount = (uint32_t)vertexAttribs.size();
 		vertexBufferLayout.attributes = vertexAttribs.data();
-		vertexBufferLayout.arrayStride = 6 * sizeof(float);
+		vertexBufferLayout.arrayStride = sizeof(VertexAttributes);
 		vertexBufferLayout.stepMode = VertexStepMode::Vertex;
 
-		return 0;
-	}
+		RenderPipelineDescriptor pipelineDesc;
+		pipelineDesc.vertex.bufferCount = 1;
+		pipelineDesc.vertex.buffers = &vertexBufferLayout;
 
+		pipelineDesc.vertex.module = m_shader;
+		pipelineDesc.vertex.entryPoint = "vs_main";
+		pipelineDesc.vertex.constantCount = 0;
+		pipelineDesc.vertex.constants = nullptr;
+
+		pipelineDesc.primitive.topology = PrimitiveTopology::TriangleList;
+		pipelineDesc.primitive.stripIndexFormat = IndexFormat::Undefined;
+		pipelineDesc.primitive.frontFace = FrontFace::CCW;
+		pipelineDesc.primitive.cullMode = CullMode::None;
+
+		FragmentState fragmentState;
+		fragmentState.module = m_shader;
+		fragmentState.entryPoint = "fs_main";
+		fragmentState.constantCount = 0;
+		fragmentState.constants = nullptr;
+		pipelineDesc.fragment = &fragmentState;
+
+		BlendState blendState;
+		blendState.color.srcFactor = BlendFactor::SrcAlpha;
+		blendState.color.dstFactor = BlendFactor::OneMinusSrcAlpha;
+		blendState.color.operation = BlendOperation::Add;
+		blendState.alpha.srcFactor = BlendFactor::Zero;
+		blendState.alpha.dstFactor = BlendFactor::One;
+		blendState.alpha.operation = BlendOperation::Add;
+
+		ColorTargetState colorTarget;
+		colorTarget.format = TextureFormat::BGRA8Unorm;;
+		colorTarget.blend = &blendState;
+		colorTarget.writeMask = ColorWriteMask::All;
+
+		fragmentState.targetCount = 1;
+		fragmentState.targets = &colorTarget;
+
+		DepthStencilState depthStencilState = Default;
+		depthStencilState.depthCompare = CompareFunction::Less;
+		depthStencilState.depthWriteEnabled = true;
+		TextureFormat depthTextureFormat = TextureFormat::Depth24Plus;
+		depthStencilState.format = depthTextureFormat;
+		depthStencilState.stencilReadMask = 0;
+		depthStencilState.stencilWriteMask = 0;
+		pipelineDesc.depthStencil = &depthStencilState;
+
+		pipelineDesc.multisample.count = 1;
+		pipelineDesc.multisample.mask = ~0u;
+		pipelineDesc.multisample.alphaToCoverageEnabled = false;
+
+		// Create binding layout (don't forget to = Default)
+		BindGroupLayoutEntry bindingLayout = Default;
+		bindingLayout.binding = 0;
+		bindingLayout.visibility = ShaderStage::Vertex | ShaderStage::Fragment;
+		bindingLayout.buffer.type = BufferBindingType::Uniform;
+		bindingLayout.buffer.minBindingSize = sizeof(MyUniforms);
+
+		// Create a bind group layout
+		BindGroupLayoutDescriptor bindGroupLayoutDesc{};
+		bindGroupLayoutDesc.entryCount = 1;
+		bindGroupLayoutDesc.entries = &bindingLayout;
+		BindGroupLayout bindGroupLayout = m_device.createBindGroupLayout(bindGroupLayoutDesc);
+
+		// Create the pipeline layout
+		PipelineLayoutDescriptor layoutDesc{};
+		layoutDesc.bindGroupLayoutCount = 1;
+		layoutDesc.bindGroupLayouts = (WGPUBindGroupLayout*)&bindGroupLayout;
+		PipelineLayout layout = m_device.createPipelineLayout(layoutDesc);
+		pipelineDesc.layout = layout;
+
+		m_renderPipeline = m_device.createRenderPipeline(pipelineDesc);
+	}
 
 	bool init(const char* windowName, int width, int height) {
 		m_width = width;
@@ -173,31 +250,26 @@ namespace tinyrender {
 		// Queue
 		m_queue = wgpuDeviceGetQueue(m_device);
 
-		// Configure render surface
-		SurfaceConfiguration config = {};
-		config.width = m_width;
-		config.height = m_height;
-		config.usage = TextureUsage::RenderAttachment;
-		wgpu::SurfaceCapabilities capabilities;
-		m_surface.getCapabilities(adapter, &capabilities);
-		config.format = capabilities.formats[0];
-		config.viewFormatCount = 0;
-		config.viewFormats = nullptr;
-		config.device = m_device;
-		config.presentMode = PresentMode::Fifo;
-		config.alphaMode = CompositeAlphaMode::Auto;
-
-		m_surface.configure(config);
-
 		// Release the adapter only after it has been fully utilized
 		adapter.release();
 
+		// Swap chain
+		SwapChainDescriptor swapChainDesc;
+		swapChainDesc.width = m_width;
+		swapChainDesc.height = m_height;
+		swapChainDesc.usage = TextureUsage::RenderAttachment;
+		swapChainDesc.format = TextureFormat::BGRA8Unorm;
+		swapChainDesc.presentMode = PresentMode::Fifo;
+		m_swapChain = m_device.createSwapChain(m_surface, swapChainDesc);
+		std::cout << "Got swapchain: " << m_swapChain << std::endl;
+
 		// Shader
 		m_shader = _internalLoadShaderModule(RESOURCES_DIR + std::string("/shader.wgsl"), m_device);
+		std::cout << "Loaded shaders." << std::endl;
 
 		// Render pipeline
-		RenderPipelineDescriptor pipelineDesc;
-		// Next step is here: https://github.com/eliemichel/LearnWebGPU-Code/blob/step050/main.cpp
+		_internalSetupRenderPipeline();
+		std::cout << "Got render pipeline." << std::endl;
 
 		return true;
 	}
