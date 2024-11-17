@@ -5,6 +5,8 @@
 
 #include <webgpu-utils/webgpu-utils.h>
 
+#include <glm/gtc/matrix_transform.hpp>
+
 #include <iostream>
 #include <fstream>
 #include <filesystem>
@@ -14,24 +16,46 @@ using namespace wgpu;
 
 namespace tinyrender {
 
-	static GLFWwindow* m_window;
-	int m_width, m_height;
-	static Device m_device;
-	static Queue m_queue;
-	static Surface m_surface;
-	static SwapChain m_swapChain;
-
-	static ShaderModule m_shader;
-	static RenderPipeline m_renderPipeline;
-
-	struct VertexAttributes {
-		glm::vec3 vertex;
-		glm::vec3 normal;
+	struct ObjectInternal {
+		Buffer positionBuffer;
+		Buffer normalBuffer;
+		Buffer indexBuffer;
+		uint32_t indexCount;
 	};
+
+	struct Camera {
+		float zNear = 0.1f, zFar = 500.0f;
+		glm::vec3 eye = { 10, 0, 0 };
+		glm::vec3 at = { 0, 0, 0 };
+		glm::vec3 up = { 0, 0, 1 };
+	};
+
+	struct SceneUniforms {
+		glm::mat4 projMatrix;
+		glm::mat4 viewMatrix;
+	};
+	static_assert(sizeof(SceneUniforms) % 16 == 0);
+
+	struct Scene {
+		GLFWwindow* window;
+		int width, height;
+		Device device;
+		Queue queue;
+		Surface surface;
+		RenderPipeline renderPipeline;
+		Camera camera;
+
+		SceneUniforms sceneUniforms;
+		Buffer sceneUniformBuffer;
+	};
+
+	static Scene scene;
+	static std::vector<ObjectInternal> objects;
+
 
 	static TextureView _internalNextSurfaceTextureView() {
 		SurfaceTexture surfaceTexture;
-		m_surface.getCurrentTexture(&surfaceTexture);
+		scene.surface.getCurrentTexture(&surfaceTexture);
 		if (surfaceTexture.status != SurfaceGetCurrentTextureStatus::Success) {
 			return nullptr;
 		}
@@ -51,6 +75,24 @@ namespace tinyrender {
 		wgpuTextureRelease(surfaceTexture.texture);
 
 		return targetView;
+	}
+
+	static RequiredLimits _internalSetupWpuLimits(Adapter adapter) {
+		SupportedLimits supportedLimits;
+		adapter.getLimits(&supportedLimits);
+
+		RequiredLimits requiredLimits = Default;
+		requiredLimits.limits.maxVertexAttributes = 2;
+		requiredLimits.limits.maxVertexBuffers = 1;
+		requiredLimits.limits.maxBufferSize = 1000 * sizeof(float);
+		requiredLimits.limits.maxVertexBufferArrayStride = 6 * sizeof(float);
+		requiredLimits.limits.maxInterStageShaderComponents = 3;
+		requiredLimits.limits.maxDynamicUniformBuffersPerPipelineLayout = 1;
+
+		requiredLimits.limits.minUniformBufferOffsetAlignment = supportedLimits.limits.minUniformBufferOffsetAlignment;
+		requiredLimits.limits.minStorageBufferOffsetAlignment = supportedLimits.limits.minStorageBufferOffsetAlignment;
+
+		return requiredLimits;
 	}
 
 	static ShaderModule _internalLoadShaderModule(const fs::path& path, Device device) {
@@ -74,35 +116,42 @@ namespace tinyrender {
 		return device.createShaderModule(shaderDesc);
 	}
 
-	static int _internalCreateObject(const object& obj) {
-		return 0;
-	}
-
 	static void _internalSetupRenderPipeline() {
-		// Vertex fetch
+		ShaderModule shader = _internalLoadShaderModule(
+			RESOURCES_DIR + std::string("/simple.wgsl"), 
+			scene.device
+		);
+
+		struct VertexAttributes {
+			glm::vec3 vertex;
+			glm::vec3 normal;
+		};
+
+		// Create the render pipeline
+		RenderPipelineDescriptor pipelineDesc;
+
+		// Configure the vertex pipeline
+		VertexBufferLayout vertexBufferLayout;
 		std::vector<VertexAttribute> vertexAttribs(2);
 
-		// Vertex
+		// Describe the position attribute
 		vertexAttribs[0].shaderLocation = 0;
 		vertexAttribs[0].format = VertexFormat::Float32x3;
 		vertexAttribs[0].offset = 0;
 
-		// Normal
+		// Describe the normal attribute
 		vertexAttribs[1].shaderLocation = 1;
 		vertexAttribs[1].format = VertexFormat::Float32x3;
 		vertexAttribs[1].offset = offsetof(VertexAttributes, normal);
 
-		VertexBufferLayout vertexBufferLayout;
-		vertexBufferLayout.attributeCount = (uint32_t)vertexAttribs.size();
+		vertexBufferLayout.attributeCount = static_cast<uint32_t>(vertexAttribs.size());
 		vertexBufferLayout.attributes = vertexAttribs.data();
 		vertexBufferLayout.arrayStride = sizeof(VertexAttributes);
 		vertexBufferLayout.stepMode = VertexStepMode::Vertex;
 
-		RenderPipelineDescriptor pipelineDesc;
 		pipelineDesc.vertex.bufferCount = 1;
 		pipelineDesc.vertex.buffers = &vertexBufferLayout;
-
-		pipelineDesc.vertex.module = m_shader;
+		pipelineDesc.vertex.module = shader;
 		pipelineDesc.vertex.entryPoint = "vs_main";
 		pipelineDesc.vertex.constantCount = 0;
 		pipelineDesc.vertex.constants = nullptr;
@@ -113,11 +162,10 @@ namespace tinyrender {
 		pipelineDesc.primitive.cullMode = CullMode::None;
 
 		FragmentState fragmentState;
-		fragmentState.module = m_shader;
+		fragmentState.module = shader;
 		fragmentState.entryPoint = "fs_main";
 		fragmentState.constantCount = 0;
 		fragmentState.constants = nullptr;
-		pipelineDesc.fragment = &fragmentState;
 
 		BlendState blendState;
 		blendState.color.srcFactor = BlendFactor::SrcAlpha;
@@ -128,52 +176,103 @@ namespace tinyrender {
 		blendState.alpha.operation = BlendOperation::Add;
 
 		ColorTargetState colorTarget;
-		colorTarget.format = TextureFormat::BGRA8Unorm;;
+		colorTarget.format = TextureFormat::BGRA8Unorm;
 		colorTarget.blend = &blendState;
 		colorTarget.writeMask = ColorWriteMask::All;
 
 		fragmentState.targetCount = 1;
 		fragmentState.targets = &colorTarget;
-
-		DepthStencilState depthStencilState = Default;
-		depthStencilState.depthCompare = CompareFunction::Less;
-		depthStencilState.depthWriteEnabled = true;
-		TextureFormat depthTextureFormat = TextureFormat::Depth24Plus;
-		depthStencilState.format = depthTextureFormat;
-		depthStencilState.stencilReadMask = 0;
-		depthStencilState.stencilWriteMask = 0;
-		pipelineDesc.depthStencil = &depthStencilState;
-
+		pipelineDesc.fragment = &fragmentState;
+		pipelineDesc.depthStencil = nullptr;
 		pipelineDesc.multisample.count = 1;
 		pipelineDesc.multisample.mask = ~0u;
 		pipelineDesc.multisample.alphaToCoverageEnabled = false;
+		pipelineDesc.layout = nullptr;
 
 		// Create binding layout (don't forget to = Default)
 		BindGroupLayoutEntry bindingLayout = Default;
 		bindingLayout.binding = 0;
 		bindingLayout.visibility = ShaderStage::Vertex | ShaderStage::Fragment;
 		bindingLayout.buffer.type = BufferBindingType::Uniform;
-		bindingLayout.buffer.minBindingSize = sizeof(MyUniforms);
+		bindingLayout.buffer.minBindingSize = sizeof(SceneUniforms);
 
 		// Create a bind group layout
 		BindGroupLayoutDescriptor bindGroupLayoutDesc{};
 		bindGroupLayoutDesc.entryCount = 1;
 		bindGroupLayoutDesc.entries = &bindingLayout;
-		BindGroupLayout bindGroupLayout = m_device.createBindGroupLayout(bindGroupLayoutDesc);
+		BindGroupLayout bindGroupLayout = scene.device.createBindGroupLayout(bindGroupLayoutDesc);
 
 		// Create the pipeline layout
 		PipelineLayoutDescriptor layoutDesc{};
 		layoutDesc.bindGroupLayoutCount = 1;
 		layoutDesc.bindGroupLayouts = (WGPUBindGroupLayout*)&bindGroupLayout;
-		PipelineLayout layout = m_device.createPipelineLayout(layoutDesc);
+		PipelineLayout layout = scene.device.createPipelineLayout(layoutDesc);
 		pipelineDesc.layout = layout;
 
-		m_renderPipeline = m_device.createRenderPipeline(pipelineDesc);
+		scene.renderPipeline = scene.device.createRenderPipeline(pipelineDesc);
+
+		shader.release();
+
+		// Create the depth texture
+		TextureDescriptor depthTextureDesc;
+		depthTextureDesc.dimension = TextureDimension::_2D;
+		depthTextureDesc.format = depthTextureFormat;
+		depthTextureDesc.mipLevelCount = 1;
+		depthTextureDesc.sampleCount = 1;
+		depthTextureDesc.size = { 640, 480, 1 };
+		depthTextureDesc.usage = TextureUsage::RenderAttachment;
+		depthTextureDesc.viewFormatCount = 1;
+		depthTextureDesc.viewFormats = (WGPUTextureFormat*)&depthTextureFormat;
+		Texture depthTexture = scene.device.createTexture(depthTextureDesc);
+
+		// Create the view of the depth texture manipulated by the rasterizer
+		TextureViewDescriptor depthTextureViewDesc;
+		depthTextureViewDesc.aspect = TextureAspect::DepthOnly;
+		depthTextureViewDesc.baseArrayLayer = 0;
+		depthTextureViewDesc.arrayLayerCount = 1;
+		depthTextureViewDesc.baseMipLevel = 0;
+		depthTextureViewDesc.mipLevelCount = 1;
+		depthTextureViewDesc.dimension = TextureViewDimension::_2D;
+		depthTextureViewDesc.format = depthTextureFormat;
+		TextureView depthTextureView = depthTexture.createView(depthTextureViewDesc);
+		// TODO: store depthTexture and depthTexture view for the render pass to happen later
 	}
 
+	static int _internalCreateObject(const object& obj) {
+		ObjectInternal newObj;
+
+		// Position buffer
+		BufferDescriptor bufferDesc;
+		bufferDesc.size = obj.vertices.size() * sizeof(glm::vec3);
+		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Vertex;
+		bufferDesc.mappedAtCreation = false;
+		newObj.positionBuffer = scene.device.createBuffer(bufferDesc);
+		scene.queue.writeBuffer(newObj.positionBuffer, 0, obj.vertices.data(), bufferDesc.size);
+
+		// Normal buffer
+		bufferDesc.size = obj.normals.size() * sizeof(glm::vec3);
+		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Vertex;
+		bufferDesc.mappedAtCreation = false;
+		newObj.normalBuffer = scene.device.createBuffer(bufferDesc);
+		scene.queue.writeBuffer(newObj.normalBuffer, 0, obj.normals.data(), bufferDesc.size);
+
+		// Triangle buffer
+		newObj.indexCount = static_cast<uint32_t>(obj.vertices.size() / 3);
+		bufferDesc.size = obj.triangles.size() * sizeof(int);
+		bufferDesc.size = (bufferDesc.size + 3) & ~3;
+		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Index;
+		newObj.indexBuffer = scene.device.createBuffer(bufferDesc);
+		scene.queue.writeBuffer(newObj.indexBuffer, 0, obj.triangles.data(), bufferDesc.size);
+
+		// Return index in vector
+		objects.push_back(newObj);
+		return static_cast<int>(objects.size() - 1);
+	}
+
+
 	bool init(const char* windowName, int width, int height) {
-		m_width = width;
-		m_height = height;
+		scene.width = width;
+		scene.height = height;
 
 		// GLFW
 		if (!glfwInit()) {
@@ -182,8 +281,8 @@ namespace tinyrender {
 		}
 
 		// Window
-		m_window = glfwCreateWindow(width, height, windowName, nullptr, nullptr);
-		if (!m_window) {
+		scene.window = glfwCreateWindow(width, height, windowName, nullptr, nullptr);
+		if (!scene.window) {
 			std::cerr << "Error: could not open window" << std::endl;
 			glfwTerminate();
 			return false;
@@ -193,10 +292,10 @@ namespace tinyrender {
 		Instance instance = wgpuCreateInstance(nullptr);
 
 		// Adapter
-		m_surface = glfwGetWGPUSurface(instance, m_window);
+		scene.surface = glfwGetWGPUSurface(instance, scene.window);
 		RequestAdapterOptions adapterOpts = {};
 		adapterOpts.nextInChain = nullptr;
-		adapterOpts.compatibleSurface = m_surface;
+		adapterOpts.compatibleSurface = scene.surface;
 		Adapter adapter = requestAdapterSync(instance, &adapterOpts);
 		std::cout << "Got adapter." << std::endl;
 
@@ -213,11 +312,12 @@ namespace tinyrender {
 		std::cout << "Requesting device..." << std::endl;
 		DeviceDescriptor deviceDesc = {};
 		deviceDesc.nextInChain = nullptr;
-		deviceDesc.label = "TinyrenderDevice";
+		deviceDesc.label = "TinyRenderDevice";
 		deviceDesc.requiredFeatureCount = 0;
-		deviceDesc.requiredLimits = nullptr;
+		auto limits = _internalSetupWpuLimits(adapter);
+		deviceDesc.requiredLimits = &limits;
 		deviceDesc.defaultQueue.nextInChain = nullptr;
-		deviceDesc.defaultQueue.label = "The default queue";
+		deviceDesc.defaultQueue.label = "Default queue";
 		deviceDesc.deviceLostCallbackInfo.callback = [](
 				WGPUDevice const* /*device*/, 
 				WGPUDeviceLostReason reason, 
@@ -230,7 +330,7 @@ namespace tinyrender {
 			}
 			std::cout << std::endl;
 		};
-		m_device = requestDeviceSync(adapter, &deviceDesc);
+		scene.device = requestDeviceSync(adapter, &deviceDesc);
 		std::cout << "Got device." << std::endl;
 
 		// Device error callback
@@ -245,37 +345,46 @@ namespace tinyrender {
 			}
 			std::cout << std::endl;
 		};
-		wgpuDeviceSetUncapturedErrorCallback(m_device, onDeviceError, nullptr);
+		wgpuDeviceSetUncapturedErrorCallback(scene.device, onDeviceError, nullptr);
 
 		// Queue
-		m_queue = wgpuDeviceGetQueue(m_device);
+		scene.queue = wgpuDeviceGetQueue(scene.device);
 
 		// Release the adapter only after it has been fully utilized
 		adapter.release();
 
-		// Swap chain
-		SwapChainDescriptor swapChainDesc;
-		swapChainDesc.width = m_width;
-		swapChainDesc.height = m_height;
-		swapChainDesc.usage = TextureUsage::RenderAttachment;
-		swapChainDesc.format = TextureFormat::BGRA8Unorm;
-		swapChainDesc.presentMode = PresentMode::Fifo;
-		m_swapChain = m_device.createSwapChain(m_surface, swapChainDesc);
-		std::cout << "Got swapchain: " << m_swapChain << std::endl;
-
-		// Shader
-		m_shader = _internalLoadShaderModule(RESOURCES_DIR + std::string("/shader.wgsl"), m_device);
-		std::cout << "Loaded shaders." << std::endl;
+		// Surface
+		SurfaceConfiguration config = {};
+		config.width = scene.width;
+		config.height = scene.height;
+		config.usage = TextureUsage::RenderAttachment;
+		wgpu::SurfaceCapabilities capabilities;
+		scene.surface.getCapabilities(adapter, &capabilities);
+		config.format = capabilities.formats[0];
+		config.viewFormatCount = 0;
+		config.viewFormats = nullptr;
+		config.device = scene.device;
+		config.presentMode = PresentMode::Fifo;
+		config.alphaMode = CompositeAlphaMode::Auto;
+		scene.surface.configure(config);
+		std::cout << "Got surface." << std::endl;
 
 		// Render pipeline
 		_internalSetupRenderPipeline();
 		std::cout << "Got render pipeline." << std::endl;
 
+		// Uniform buffer
+		BufferDescriptor bufferDesc;
+		bufferDesc.size = sizeof(SceneUniforms);
+		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Uniform;
+		bufferDesc.mappedAtCreation = false;
+		scene.sceneUniformBuffer = scene.device.createBuffer(bufferDesc);
+
 		return true;
 	}
 	
 	bool shouldQuit() {
-		return glfwWindowShouldClose(m_window);
+		return glfwWindowShouldClose(scene.window);
 	}
 
 	void update() {
@@ -290,7 +399,7 @@ namespace tinyrender {
 		// Create a command encoder for the draw call
 		CommandEncoderDescriptor encoderDesc = {};
 		encoderDesc.label = "My command encoder";
-		CommandEncoder encoder = wgpuDeviceCreateCommandEncoder(m_device, &encoderDesc);
+		CommandEncoder encoder = wgpuDeviceCreateCommandEncoder(scene.device, &encoderDesc);
 
 		// Create the render pass that clears the screen with our color
 		RenderPassColorAttachment renderPassColorAttachment = {};
@@ -306,8 +415,42 @@ namespace tinyrender {
 		renderPassDesc.depthStencilAttachment = nullptr;
 		renderPassDesc.timestampWrites = nullptr;
 
-		// Create the render pass and end it immediately
+		// Update camera data & buffer
+		scene.sceneUniforms.projMatrix = glm::perspective(
+			glm::radians(45.0f),
+			float(scene.width) / float(scene.height),
+			scene.camera.zNear,
+			scene.camera.zFar
+		);
+		scene.sceneUniforms.viewMatrix = glm::lookAt(
+			scene.camera.eye,
+			scene.camera.at,
+			scene.camera.up
+		);
+		scene.queue.writeBuffer(
+			scene.sceneUniformBuffer, 
+			0, 
+			&scene.sceneUniforms, 
+			sizeof(SceneUniforms)
+		);
+
+		// Create the render pass
 		RenderPassEncoder renderPass = encoder.beginRenderPass(renderPassDesc);
+		renderPass.setPipeline(scene.renderPipeline);
+		for (auto& obj : objects) {
+			renderPass.setVertexBuffer(0, 
+				obj.positionBuffer, 
+				0, 
+				obj.positionBuffer.getSize()
+			);
+			renderPass.setIndexBuffer(obj.indexBuffer, 
+				IndexFormat::Uint32, 
+				0, 
+				obj.indexBuffer.getSize()
+			);
+			renderPass.drawIndexed(obj.indexCount, 1, 0, 0, 0);
+		}
+
 		renderPass.end();
 		renderPass.release();
 
@@ -317,7 +460,7 @@ namespace tinyrender {
 		CommandBuffer command = encoder.finish(cmdBufferDescriptor);
 		encoder.release();
 
-		m_queue.submit(1, &command);
+		scene.queue.submit(1, &command);
 		command.release();
 
 		// At the end of the frame
@@ -325,33 +468,114 @@ namespace tinyrender {
 	}
 
 	void swap() {
-		m_surface.present();
-		m_device.tick();
+		scene.surface.present();
+		scene.device.tick();
 	}
 
 	void terminate() {
-		m_surface.unconfigure();
-		
-		m_queue.release();
-		m_surface.release();
-		m_device.release();
+		for (auto& obj : objects) {
+			obj.indexBuffer.release();
+			obj.positionBuffer.release();
+			obj.normalBuffer.release();
+		}
 
-		glfwDestroyWindow(m_window);
+		scene.surface.unconfigure();
+		scene.surface.release();
+		scene.queue.release();
+		scene.device.release();
+
+		glfwDestroyWindow(scene.window);
 		glfwTerminate();
 	}
 
 
 	int addObject(const object& obj) {
-		_internalCreateObject(obj);
-		return 0;
+		return _internalCreateObject(obj);
 	}
 	
 	void removeObject(int /*id*/) {
 
 	}
 
-	int addSphere(float /*r*/, int /*n*/) {
-		return 0;
+	int addSphere(float r, int n) {
+		object newObj;
+
+		const int p = 2 * n;
+		const int s = (2 * n) * (n - 1) + 2;
+		newObj.vertices.resize(s);
+		newObj.normals.resize(s);
+
+		// Create set of vertices
+		const float Pi = 3.14159265358979323846f;
+		const float HalfPi = Pi / 2.0f;
+		const float dt = Pi / float(n);
+		const float df = Pi / float(n);
+		int k = 0;
+
+		float f = -HalfPi;
+		for (int j = 1; j < n; j++)
+		{
+			f += df;
+
+			// Theta
+			float t = 0.0;
+			for (int i = 0; i < 2 * n; i++)
+			{
+				glm::vec3 u = { cos(t) * cos(f), sin(f), sin(t) * cos(f) };
+				newObj.normals[k] = u;
+				newObj.vertices[k] = u * r;
+				k++;
+				t += dt;
+			}
+		}
+		// North pole
+		newObj.normals[s - 2] = { 0, 1, 0 };
+		newObj.vertices[s - 2] = { 0, r, 0 };
+
+		// South
+		newObj.normals[s - 1] = { 0, -1, 0 };
+		newObj.vertices[s - 1] = { 0, -r, 0 };
+
+		// Reserve space for the smooth triangle array
+		newObj.triangles.reserve(4 * n * (n - 1) * 3);
+
+		// South cap
+		for (int i = 0; i < 2 * n; i++)
+		{
+			newObj.triangles.push_back(s - 1);
+			newObj.triangles.push_back((i + 1) % p);
+			newObj.triangles.push_back(i);
+		}
+
+		// North cap
+		for (int i = 0; i < 2 * n; i++)
+		{
+			newObj.triangles.push_back(s - 2);
+			newObj.triangles.push_back(2 * n * (n - 2) + i);
+			newObj.triangles.push_back(2 * n * (n - 2) + (i + 1) % p);
+		}
+
+		// Sphere
+		for (int j = 1; j < n - 1; j++)
+		{
+			for (int i = 0; i < 2 * n; i++)
+			{
+				const int v0 = (j - 1) * p + i;
+				const int v1 = (j - 1) * p + (i + 1) % p;
+				const int v2 = j * p + (i + 1) % p;
+				const int v3 = j * p + i;
+
+				newObj.triangles.push_back(v0);
+				newObj.triangles.push_back(v1);
+				newObj.triangles.push_back(v2);
+
+				newObj.triangles.push_back(v0);
+				newObj.triangles.push_back(v2);
+				newObj.triangles.push_back(v3);
+			}
+		}
+
+		return addObject(newObj);
 	}
 
 } // namespace tinyrender

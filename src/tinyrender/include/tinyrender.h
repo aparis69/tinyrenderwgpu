@@ -3,6 +3,7 @@
 #include <GLFW/glfw3.h>
 #include <glfw3webgpu/glfw3webgpu.h>
 #include <glm/glm.hpp>
+
 #include <vector>
 
 namespace tinyrender {
