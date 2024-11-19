@@ -2,3 +2,167 @@ cmake_minimum_required(VERSION 3.0.0...3.24 FATAL_ERROR)
 project(webgpu VERSION 1.0.0)
 
 include(webgpu.cmake)
+
+set(spirv_targets
+	SPIRV-Tools-opt
+	SPIRV-Tools-static
+	spirv-tools-build-version
+	spirv-tools-header-DebugInfo
+	spirv-tools-header-NonSemanticShaderDebugInfo100
+	spirv-tools-header-OpenCLDebugInfo100
+	spv-tools-cldi100
+	spv-tools-clspvreflection
+	spv-tools-debuginfo
+	spv-tools-shdi100
+	spv-tools-spv-amd-gs
+	spv-tools-spv-amd-sb
+	spv-tools-spv-amd-sevp
+	spv-tools-spv-amd-stm
+	spv-tools-vkspreflection
+)
+targets_set_folder(spirv_targets "third_party/SPIRV")
+
+set(dawn_targets
+	core_tables
+	dawn_common
+	dawn_headers
+	dawn_native
+	dawn_platform
+	dawncpp_headers
+	enum_string_mapping
+	extinst_tables
+	tint_api
+	tint_api_common
+	tint_lang_core
+	tint_lang_core_common
+	tint_lang_core_constant
+	tint_lang_core_intrinsic
+	tint_lang_core_ir
+	tint_lang_core_ir_transform
+	tint_lang_core_ir_transform_common
+	tint_lang_core_type
+	tint_lang_hlsl_writer_common
+	tint_lang_spirv
+	tint_lang_spirv_intrinsic
+	tint_lang_spirv_ir
+	tint_lang_spirv_type
+	tint_lang_spirv_writer
+	tint_lang_spirv_writer_ast_printer
+	tint_lang_spirv_writer_ast_raise
+	tint_lang_spirv_writer_common
+	tint_lang_spirv_writer_printer
+	tint_lang_spirv_writer_raise
+	tint_lang_wgsl
+	tint_lang_wgsl_ast
+	tint_lang_wgsl_ast_transform
+	tint_lang_wgsl_common
+	tint_lang_wgsl_features
+	tint_lang_wgsl_helpers
+	tint_lang_wgsl_inspector
+	tint_lang_wgsl_intrinsic
+	tint_lang_wgsl_ir
+	tint_lang_wgsl_program
+	tint_lang_wgsl_reader
+	tint_lang_wgsl_reader_lower
+	tint_lang_wgsl_reader_parser
+	tint_lang_wgsl_reader_program_to_ir
+	tint_lang_wgsl_resolver
+	tint_lang_wgsl_sem
+	tint_lang_wgsl_writer
+	tint_lang_wgsl_writer_ast_printer
+	tint_lang_wgsl_writer_ir_to_program
+	tint_lang_wgsl_writer_raise
+	tint_lang_wgsl_writer_syntax_tree_printer
+	tint_utils_containers
+	tint_utils_debug
+	tint_utils_diagnostic
+	tint_utils_generator
+	tint_utils_ice
+	tint_utils_id
+	tint_utils_macros
+	tint_utils_math
+	tint_utils_memory
+	tint_utils_reflection
+	tint_utils_result
+	tint_utils_rtti
+	tint_utils_strconv
+	tint_utils_symbol
+	tint_utils_system
+	tint_utils_text
+	tint_utils_traits
+	webgpu_dawn
+)
+targets_set_folder(dawn_targets "third_party/Dawn")
+
+set(abseil_targets
+	absl_crc_cord_state
+	absl_crc_cpu_detect
+	absl_crc_internal
+	absl_crc32c
+	absl_kernel_timeout_internal
+	absl_string_view
+	absl_time
+	absl_synchronization
+	absl_symbolize
+	absl_strings
+	absl_stacktrace
+	absl_raw_hash_set
+	absl_int128
+	absl_hash
+	absl_demangle_internal
+	absl_cord
+	absl_base
+	absl_bad_variant_access
+	absl_bad_optional_access
+)
+targets_set_folder(abseil_targets "third_party/Abseil")
+
+set(abseil_internal_targets
+	absl_bad_any_cast_impl
+	absl_city
+	absl_civil_time
+	absl_cord_internal
+	absl_cordz_functions
+	absl_cordz_handle
+	absl_cordz_info
+	absl_cordz_sample_token
+	absl_debugging_internal
+	absl_examine_stack
+	absl_exponential_biased
+	absl_flags
+	absl_flags_commandlineflag
+	absl_flags_commandlineflag_internal
+	absl_flags_config
+	absl_flags_marshalling
+	absl_flags_parse
+	absl_flags_private_handle_accessor
+	absl_flags_reflection
+	absl_flags_usage
+	absl_flags_usage_internal
+	absl_graphcycles_internal
+	absl_hashtablez_sampler
+	absl_log_severity
+	absl_low_level_hash
+	absl_malloc_internal
+	absl_periodic_sampler
+	absl_random_distributions
+	absl_random_internal_distribution_test_util
+	absl_random_internal_platform
+	absl_random_internal_pool_urbg
+	absl_random_internal_randen
+	absl_random_internal_randen_hwaes
+	absl_random_internal_randen_hwaes_impl
+	absl_random_internal_randen_slow
+	absl_random_internal_seed_material
+	absl_random_seed_gen_exception
+	absl_random_seed_sequences
+	absl_raw_logging_internal
+	absl_scoped_set_env
+	absl_spinlock_wait
+	absl_str_format_internal
+	absl_strerror
+	absl_strings_internal
+	absl_throw_delegate
+	absl_time_zone
+)
+targets_set_folder(abseil_internal_targets "third_party/Abseil/internal")

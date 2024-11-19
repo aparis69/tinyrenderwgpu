@@ -238,31 +238,31 @@ namespace tinyrender {
 		// TODO: store depthTexture and depthTexture view for the render pass to happen later
 	}
 
-	static int _internalCreateObject(const object& obj) {
+	static int _internalCreateObject(const ObjectDescriptor& objDesc) {
 		ObjectInternal newObj;
 
 		// Position buffer
 		BufferDescriptor bufferDesc;
-		bufferDesc.size = obj.vertices.size() * sizeof(glm::vec3);
+		bufferDesc.size = objDesc.vertices.size() * sizeof(glm::vec3);
 		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Vertex;
 		bufferDesc.mappedAtCreation = false;
 		newObj.positionBuffer = scene.device.createBuffer(bufferDesc);
-		scene.queue.writeBuffer(newObj.positionBuffer, 0, obj.vertices.data(), bufferDesc.size);
+		scene.queue.writeBuffer(newObj.positionBuffer, 0, objDesc.vertices.data(), bufferDesc.size);
 
 		// Normal buffer
-		bufferDesc.size = obj.normals.size() * sizeof(glm::vec3);
+		bufferDesc.size = objDesc.normals.size() * sizeof(glm::vec3);
 		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Vertex;
 		bufferDesc.mappedAtCreation = false;
 		newObj.normalBuffer = scene.device.createBuffer(bufferDesc);
-		scene.queue.writeBuffer(newObj.normalBuffer, 0, obj.normals.data(), bufferDesc.size);
+		scene.queue.writeBuffer(newObj.normalBuffer, 0, objDesc.normals.data(), bufferDesc.size);
 
 		// Triangle buffer
-		newObj.indexCount = static_cast<uint32_t>(obj.vertices.size() / 3);
-		bufferDesc.size = obj.triangles.size() * sizeof(int);
+		newObj.indexCount = static_cast<uint32_t>(objDesc.vertices.size() / 3);
+		bufferDesc.size = objDesc.triangles.size() * sizeof(int);
 		bufferDesc.size = (bufferDesc.size + 3) & ~3;
 		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Index;
 		newObj.indexBuffer = scene.device.createBuffer(bufferDesc);
-		scene.queue.writeBuffer(newObj.indexBuffer, 0, obj.triangles.data(), bufferDesc.size);
+		scene.queue.writeBuffer(newObj.indexBuffer, 0, objDesc.triangles.data(), bufferDesc.size);
 
 		// Return index in vector
 		objects.push_back(newObj);
@@ -489,8 +489,8 @@ namespace tinyrender {
 	}
 
 
-	int addObject(const object& obj) {
-		return _internalCreateObject(obj);
+	int addObject(const ObjectDescriptor& objDesc) {
+		return _internalCreateObject(objDesc);
 	}
 	
 	void removeObject(int /*id*/) {
@@ -498,7 +498,7 @@ namespace tinyrender {
 	}
 
 	int addSphere(float r, int n) {
-		object newObj;
+		ObjectDescriptor newObj;
 
 		const int p = 2 * n;
 		const int s = (2 * n) * (n - 1) + 2;

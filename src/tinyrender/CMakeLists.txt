@@ -6,16 +6,18 @@ set(SRC
 add_library(TinyRender STATIC ${SRC})
 
 target_include_directories(TinyRender 
-	PRIVATE 
+	PUBLIC 
 	include
 )
 
 target_link_libraries(TinyRender
+	PUBLIC
+	webgpu-utils
+	PRIVATE
 	glfw
 	webgpu
 	glfw3webgpu
 	glm_static
-	webgpu-utils
 )
 
 target_include_directories(TinyRender INTERFACE tinyrender ./include/)
@@ -29,4 +31,4 @@ endif (DEV_MODE)
 enable_cpp17()
 enable_multiprocessor_compilation()
 target_treat_warnings_as_errors(TinyRender)
-group_source_by_folder(${SRC})
+target_group_source_by_folder(TinyRender)

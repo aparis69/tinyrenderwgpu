@@ -9,7 +9,7 @@
 namespace tinyrender {
 
 	// Public interface
-	struct object {
+	struct ObjectDescriptor {
 	public:
 		glm::vec3 translation = { 0, 0, 0 };
 		glm::vec3 rotation = { 0, 0, 0 };
@@ -29,7 +29,7 @@ namespace tinyrender {
 	void terminate();
 
 	// Object management
-	int addObject(const object& obj);
+	int addObject(const ObjectDescriptor& objDesc);
 	void removeObject(int id);
 
 	// Primitives
