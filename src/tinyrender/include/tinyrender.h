@@ -17,7 +17,7 @@ namespace tinyrender {
 		std::vector<glm::vec3> vertices;
 		std::vector<glm::vec3> normals;
 		std::vector<glm::vec3> colors;
-		std::vector<int> triangles;
+		std::vector<uint16_t> triangles;
 	};
 
 	// Windowing
@@ -31,6 +31,10 @@ namespace tinyrender {
 	// Object management
 	int addObject(const ObjectDescriptor& objDesc);
 	void removeObject(int id);
+	void updateObject(int id, const glm::vec3& p, const glm::vec3& s, const glm::vec3& r);
+
+	// Camera
+	void setCameraEye(const glm::vec3& eye);
 
 	// Primitives
 	int addSphere(float r, int n);

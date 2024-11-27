@@ -4,7 +4,12 @@ struct SceneUniforms {
 	viewMatrix: mat4x4f
 };
 
+struct ModelUniforms {
+	modelMatrix: mat4x4f
+};
+
 @group(0) @binding(0) var<uniform> uSceneUniforms: SceneUniforms;
+@group(0) @binding(1) var<uniform> uModelUniforms: ModelUniforms;
 
 struct VertexIn {
     @location(0) position: vec3f,
@@ -19,12 +24,12 @@ struct VertexOut {
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
 	var out: VertexOut;
-    out.position = uSceneUniforms.projMatrix * uSceneUniforms.viewMatrix * vec4f(in.position, 1.0);
-    out.normal = in.normal; 
+    out.position = uSceneUniforms.projMatrix * uSceneUniforms.viewMatrix * uModelUniforms.modelMatrix * vec4f(in.position, 1.0f);
+    out.normal = uModelUniforms.modelMatrix * vec4f(in.normal, 0.0f); 
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4f {
-    return vec4f(in.normal.xyz, 1.0);
+    return vec4f(0.2f * (vec3f(3.0f) + 2.0f * in.normal.xyz), 1.0f);
 }
