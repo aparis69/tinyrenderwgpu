@@ -19,7 +19,12 @@ namespace tinyrender {
 	struct VertexAttributes {
 		glm::vec3 vertex;
 		glm::vec3 normal;
+	};	
+
+	struct ObjectUniforms {
+		glm::mat4 modelMatrix;
 	};
+	static_assert(sizeof(ObjectUniforms) % 16 == 0);
 
 	struct ObjectInternal {
 		Buffer positionBuffer;
@@ -27,9 +32,9 @@ namespace tinyrender {
 		Buffer indexBuffer;
 		uint16_t drawCount;
 
-		BindGroup bindGroup;
+		ObjectUniforms uniforms;
 		Buffer uniformBuffer;
-		glm::mat4 modelMatrix;
+		BindGroup bindGroup;
 	};
 
 	struct Camera {
@@ -209,23 +214,31 @@ namespace tinyrender {
 		pipelineDesc.multisample.mask = ~0u;
 		pipelineDesc.multisample.alphaToCoverageEnabled = false;
 
-		// Create binding layout (don't forget to = Default)
+		// Create a bind group layout
 		BindGroupLayoutEntry bindingLayout = Default;
 		bindingLayout.binding = 0;
 		bindingLayout.visibility = ShaderStage::Vertex | ShaderStage::Fragment;
 		bindingLayout.buffer.type = BufferBindingType::Uniform;
 		bindingLayout.buffer.minBindingSize = sizeof(SceneUniforms);
 
-		// Create a bind group layout
+		std::vector<BindGroupLayout> bindGroupLayouts;
 		BindGroupLayoutDescriptor bindGroupLayoutDesc{};
 		bindGroupLayoutDesc.entryCount = 1;
 		bindGroupLayoutDesc.entries = &bindingLayout;
-		BindGroupLayout bindGroupLayout = scene.device.createBindGroupLayout(bindGroupLayoutDesc);
+		bindGroupLayouts.push_back(scene.device.createBindGroupLayout(bindGroupLayoutDesc));
+
+		bindingLayout.binding = 0;
+		bindingLayout.visibility = ShaderStage::Vertex | ShaderStage::Fragment;
+		bindingLayout.buffer.type = BufferBindingType::Uniform;
+		bindingLayout.buffer.minBindingSize = sizeof(ObjectUniforms);
+		bindGroupLayoutDesc.entryCount = 1;
+		bindGroupLayoutDesc.entries = &bindingLayout;
+		bindGroupLayouts.push_back(scene.device.createBindGroupLayout(bindGroupLayoutDesc));
 
 		// Create the pipeline layout
 		PipelineLayoutDescriptor layoutDesc{};
-		layoutDesc.bindGroupLayoutCount = 1;
-		layoutDesc.bindGroupLayouts = (WGPUBindGroupLayout*)&bindGroupLayout;
+		layoutDesc.bindGroupLayoutCount = 2;
+		layoutDesc.bindGroupLayouts = (WGPUBindGroupLayout*)&bindGroupLayouts[0];
 		PipelineLayout layout = scene.device.createPipelineLayout(layoutDesc);
 		pipelineDesc.layout = layout;
 
@@ -272,7 +285,7 @@ namespace tinyrender {
 
 		// A bind group contains one or multiple bindings
 		BindGroupDescriptor bindGroupDesc;
-		bindGroupDesc.layout = bindGroupLayout;
+		bindGroupDesc.layout = bindGroupLayouts[0];
 		bindGroupDesc.entryCount = bindGroupLayoutDesc.entryCount;
 		bindGroupDesc.entries = &binding;
 		scene.bindGroup = scene.device.createBindGroup(bindGroupDesc);
@@ -304,30 +317,38 @@ namespace tinyrender {
 		scene.queue.writeBuffer(newObj.indexBuffer, 0, objDesc.triangles.data(), bufferDesc.size);
 
 		// Uniform buffer (with model matrix)
-		bufferDesc.size = sizeof(glm::mat4);
-		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Vertex;
+		newObj.uniforms.modelMatrix = glm::identity<glm::mat4>();
+		newObj.uniforms.modelMatrix = glm::translate(newObj.uniforms.modelMatrix, objDesc.translation);
+		bufferDesc.size = sizeof(ObjectUniforms);
+		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Uniform;
 		newObj.uniformBuffer = scene.device.createBuffer(bufferDesc);
-		newObj.modelMatrix = glm::identity<glm::mat4>();
-		newObj.modelMatrix = glm::translate(newObj.modelMatrix, objDesc.translation);
-		// TODO: support rotation/scale
-		scene.queue.writeBuffer(newObj.uniformBuffer, 0, &newObj.modelMatrix, bufferDesc.size);
-
-
+		scene.queue.writeBuffer(newObj.uniformBuffer, 0, &newObj.uniforms.modelMatrix, bufferDesc.size);
 
 		// Create a binding
-		// How to create per object uniforms, and what's the relation to bindgrouplayout etc?
+		BindGroupLayoutEntry bindingLayout = Default;
+		bindingLayout.binding = 0;
+		bindingLayout.visibility = ShaderStage::Vertex | ShaderStage::Fragment;
+		bindingLayout.buffer.type = BufferBindingType::Uniform;
+		bindingLayout.buffer.minBindingSize = sizeof(ObjectUniforms);
+
+		// Create a bind group layout
+		BindGroupLayoutDescriptor bindGroupLayoutDesc{};
+		bindGroupLayoutDesc.entryCount = 1;
+		bindGroupLayoutDesc.entries = &bindingLayout;
+		BindGroupLayout bindGroupLayout = scene.device.createBindGroupLayout(bindGroupLayoutDesc);
+
 		BindGroupEntry binding{};
 		binding.binding = 0;
 		binding.buffer = newObj.uniformBuffer;
 		binding.offset = 0;
-		binding.size = sizeof(SceneUniforms);
+		binding.size = sizeof(ObjectUniforms);
 
 		// A bind group contains one or multiple bindings
 		BindGroupDescriptor bindGroupDesc;
 		bindGroupDesc.layout = bindGroupLayout;
 		bindGroupDesc.entryCount = bindGroupLayoutDesc.entryCount;
 		bindGroupDesc.entries = &binding;
-		scene.bindGroup = scene.device.createBindGroup(bindGroupDesc);
+		newObj.bindGroup = scene.device.createBindGroup(bindGroupDesc);
 
 		// Return index in vector
 		objects.push_back(newObj);
@@ -522,6 +543,7 @@ namespace tinyrender {
 			);
 			
 			renderPass.setBindGroup(0, scene.bindGroup, 0, nullptr);
+			renderPass.setBindGroup(1, obj.bindGroup, 0, nullptr);
 
 			renderPass.drawIndexed(obj.drawCount, 1, 0, 0, 0);
 		}
@@ -579,8 +601,12 @@ namespace tinyrender {
 
 	}
 
-	void updateObject(int id, const glm::vec3& p, const glm::vec3& s, const glm::vec3& r) {
-		// TODO
+	void updateObject(int id, const glm::vec3& p, const glm::vec3& /*s*/, const glm::vec3& /*r*/) {
+		assert(id < objects.size());
+		auto obj = objects[id];
+		obj.uniforms.modelMatrix = glm::identity<glm::mat4>();
+		obj.uniforms.modelMatrix = glm::translate(obj.uniforms.modelMatrix, p);
+		scene.queue.writeBuffer(obj.uniformBuffer, 0, &obj.uniforms.modelMatrix, sizeof(ObjectUniforms));
 	}
 
 	int addSphere(float r, int n) {
