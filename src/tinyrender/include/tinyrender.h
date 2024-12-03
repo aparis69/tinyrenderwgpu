@@ -21,7 +21,11 @@ namespace tinyrender {
 	};
 
 	// Windowing
-	bool init(const char* windowName = "tinyrender", int width = -1, int height = -1);
+	bool init(
+		const char* windowName = "tinyrender", 
+		int width = -1, 
+		int height = -1
+	);
 	bool shouldQuit();
 	void update();
 	void render();
@@ -29,15 +33,26 @@ namespace tinyrender {
 	void terminate();
 
 	// Object management
-	int addObject(const ObjectDescriptor& objDesc);
-	void removeObject(int id);
-	void updateObject(int id, const glm::vec3& p, const glm::vec3& s, const glm::vec3& r);
+	uint32_t addObject(
+		const ObjectDescriptor& objDesc
+	);
+	void removeObject(
+		uint32_t id
+	);
+	void updateObject(uint32_t id, 
+		const glm::vec3& t, 
+		const glm::vec3& r, 
+		const glm::vec3& s
+	);
 
 	// Camera
-	void setCameraEye(const glm::vec3& eye);
+	void setCameraEye(
+		const glm::vec3& eye
+	);
 
 	// Primitives
-	int addSphere(float r, int n);
-	int addPlane(float size, int n);
+	uint32_t addSphere(float r, int n);
+	uint32_t addPlane(float size, int n);
+	uint32_t addBox(float r);
 
 } // namespace tinyrender

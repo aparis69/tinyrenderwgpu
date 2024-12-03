@@ -6,25 +6,37 @@
 #include <webgpu-utils/webgpu-utils.h>
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/euler_angles.hpp>
 
 #include <iostream>
 #include <fstream>
 #include <filesystem>
-namespace fs = std::filesystem;
+#include <unordered_map>
 
+namespace fs = std::filesystem;
 using namespace wgpu;
+using glm::vec2;
+using glm::vec3;
+using glm::vec4;
+using glm::mat4;
 
 namespace tinyrender {
 
 	struct VertexAttributes {
-		glm::vec3 position;
-		glm::vec3 normal;
+		vec3 position;
+		vec3 normal;
 	};
 
 	struct ObjectUniforms {
-		glm::mat4 modelMatrix;
+		mat4 modelMatrix;
 	};
 	static_assert(sizeof(ObjectUniforms) % 16 == 0);
+
+	struct SceneUniforms {
+		mat4 projMatrix;
+		mat4 viewMatrix;
+	};
+	static_assert(sizeof(SceneUniforms) % 16 == 0);
 
 	struct ObjectInternal {
 		Buffer vertexBuffer;
@@ -38,16 +50,10 @@ namespace tinyrender {
 
 	struct Camera {
 		float zNear = 0.1f, zFar = 500.0f;
-		glm::vec3 eye = { 3, -3, 0 };
-		glm::vec3 at = { 0, 0, 0 };
-		glm::vec3 up = { 0, 0, 1 };
+		vec3 eye = vec3(3, -3, 0);
+		vec3 at = vec3(0, 0, 0);
+		vec3 up = vec3(0, 0, 1);
 	};
-
-	struct SceneUniforms {
-		glm::mat4 projMatrix;
-		glm::mat4 viewMatrix;
-	};
-	static_assert(sizeof(SceneUniforms) % 16 == 0);
 
 	struct Scene {
 		GLFWwindow* window;
@@ -65,10 +71,17 @@ namespace tinyrender {
 	};
 
 	static Scene scene;
-	static std::vector<ObjectInternal> objects;
+	static std::unordered_map<uint32_t, ObjectInternal> objects;
 	static Texture depthTexture;
 	static TextureView depthTextureView;
 
+	static mat4 _internalComputeModelMatrix(const vec3& t, const vec3& r, const vec3& s) {
+		mat4 ret = glm::identity<mat4>();
+		ret = glm::translate(ret, t);
+		ret = ret * glm::eulerAngleXYZ(glm::radians(r.x), glm::radians(r.y), glm::radians(r.z));
+		ret = glm::scale(ret, s);
+		return ret;
+	}
 
 	static TextureView _internalNextSurfaceTextureView() {
 		SurfaceTexture surfaceTexture;
@@ -156,7 +169,7 @@ namespace tinyrender {
 		// Normal attribute
 		attributes[1].shaderLocation = 1;
 		attributes[1].format = VertexFormat::Float32x3;
-		attributes[1].offset = sizeof(glm::vec3); // offset of normal
+		attributes[1].offset = sizeof(vec3); // offset of normal
 
 		vertexBufferLayout.attributeCount = 2;
 		vertexBufferLayout.attributes = attributes.data();
@@ -299,11 +312,56 @@ namespace tinyrender {
 		scene.bindGroup = scene.device.createBindGroup(bindGroupDesc);
 	}
 
-	static int _internalCreateObject(const ObjectDescriptor& objDesc) {
+	static void _internalSetupCallbacks() {
+		glfwSetInputMode(scene.window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+
+		glfwSetWindowSizeCallback(scene.window, [](
+			GLFWwindow* /*window*/, 
+			int /*w*/, 
+			int /*h*/
+			) {
+				// TODO: find proper way
+			}
+		);
+
+		glfwSetMouseButtonCallback(scene.window, [](
+			GLFWwindow* /*window*/, 			
+			int /*button*/, 
+			int /*action*/,
+			int /*mods*/
+			) {
+
+			}
+		);
+
+		glfwSetKeyCallback(scene.window, [](
+			GLFWwindow* /*window*/, 
+			int /*key*/, 
+			int /*scancode*/, 
+			int /*action*/, 
+			int /*mods*/
+			) {
+
+			}
+		);
+
+		glfwSetScrollCallback(scene.window, [](
+			GLFWwindow* /*window*/,
+			double /*x*/,
+			double y
+			) {
+				Camera& cam = scene.camera;
+				vec3 viewDir = cam.at - cam.eye;
+				cam.eye += viewDir * float(y) * 0.025f;
+			}
+		);
+	}
+
+	static uint32_t _internalCreateObject(const ObjectDescriptor& objDesc) {
 		ObjectInternal newObj;
 
 		// Compute the flattened buffer with interleaved position & normal
-		std::vector<glm::vec3> flattenedData(objDesc.vertices.size() * 2);
+		std::vector<vec3> flattenedData(objDesc.vertices.size() * 2);
 		for (int i = 0; i < objDesc.vertices.size(); i++) {
 			flattenedData[(i * 2) + 0] = objDesc.vertices[i];
 			flattenedData[(i * 2) + 1] = objDesc.normals[i];
@@ -311,7 +369,7 @@ namespace tinyrender {
 
 		// Vertex buffer (position + normal)
 		BufferDescriptor bufferDesc;
-		bufferDesc.size = flattenedData.size() * sizeof(glm::vec3);
+		bufferDesc.size = flattenedData.size() * sizeof(vec3);
 		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Vertex;
 		bufferDesc.mappedAtCreation = false;
 		newObj.vertexBuffer = scene.device.createBuffer(bufferDesc);
@@ -326,8 +384,11 @@ namespace tinyrender {
 		scene.queue.writeBuffer(newObj.indexBuffer, 0, objDesc.triangles.data(), bufferDesc.size);
 
 		// Uniform buffer (with model matrix)
-		newObj.uniforms.modelMatrix = glm::identity<glm::mat4>();
-		newObj.uniforms.modelMatrix = glm::translate(newObj.uniforms.modelMatrix, objDesc.translation);
+		newObj.uniforms.modelMatrix = _internalComputeModelMatrix(
+			objDesc.translation, 
+			objDesc.rotation, 
+			objDesc.scale
+		);
 		bufferDesc.size = sizeof(ObjectUniforms);
 		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Uniform;
 		bufferDesc.mappedAtCreation = false;
@@ -361,8 +422,9 @@ namespace tinyrender {
 		newObj.bindGroup = scene.device.createBindGroup(bindGroupDesc);
 
 		// Return index in vector
-		objects.push_back(newObj);
-		return static_cast<int>(objects.size() - 1);
+		uint32_t id = uint32_t(objects.size());
+		objects.insert({ id, newObj });
+		return id;
 	}
 
 
@@ -395,7 +457,7 @@ namespace tinyrender {
 		RequestAdapterOptions adapterOpts = {};
 		adapterOpts.nextInChain = nullptr;
 		adapterOpts.compatibleSurface = scene.surface;
-		adapterOpts.powerPreference = WGPUPowerPreference_HighPerformance;
+		//adapterOpts.powerPreference = WGPUPowerPreference_HighPerformance;
 		Adapter adapter = requestAdapterSync(instance, &adapterOpts);
 		std::cout << "--- adapter" << std::endl;
 		AdapterProperties properties = {};
@@ -461,12 +523,11 @@ namespace tinyrender {
 		config.viewFormatCount = 0;
 		config.viewFormats = nullptr;
 		config.device = scene.device;
-		config.presentMode = PresentMode::Fifo;
+		config.presentMode = PresentMode::FifoRelaxed;
 		config.alphaMode = CompositeAlphaMode::Auto;
 		scene.surface.configure(config);
 		std::cout << "-- surface" << std::endl;
 
-		// Render pipeline
 		_internalSetupRenderPipeline();
 		std::cout << "-- render pipeline" << std::endl;
 
@@ -475,6 +536,9 @@ namespace tinyrender {
 
 		_internalSetupSceneData();
 		std::cout << "-- scene buffer and bind groups" << std::endl;
+
+		_internalSetupCallbacks();
+		std::cout << "-- callbacks" << std::endl;
 
 		return true;
 	}
@@ -546,7 +610,8 @@ namespace tinyrender {
 		// Create the render pass
 		RenderPassEncoder renderPass = encoder.beginRenderPass(renderPassDesc);
 		renderPass.setPipeline(scene.renderPipeline);
-		for (auto& obj : objects) {
+		for (auto& it : objects) {
+			auto& obj = it.second;
 			renderPass.setVertexBuffer(0,
 				obj.vertexBuffer,
 				0,
@@ -586,10 +651,11 @@ namespace tinyrender {
 	}
 
 	void terminate() {
-		for (auto& obj : objects) {
+		for (auto& it : objects) {
+			auto& obj = it.second;
 			obj.indexBuffer.destroy();
-			obj.indexBuffer.release();
 			obj.vertexBuffer.destroy();
+			obj.indexBuffer.release();
 			obj.vertexBuffer.release();
 		}
 
@@ -607,23 +673,28 @@ namespace tinyrender {
 	}
 
 
-	int addObject(const ObjectDescriptor& objDesc) {
+	uint32_t addObject(const ObjectDescriptor& objDesc) {
 		return _internalCreateObject(objDesc);
 	}
 
-	void removeObject(int /*id*/) {
-
-	}
-
-	void updateObject(int id, const glm::vec3& p, const glm::vec3& /*s*/, const glm::vec3& /*r*/) {
+	void removeObject(uint32_t id) {
 		assert(id < objects.size());
 		ObjectInternal& obj = objects[id];
-		obj.uniforms.modelMatrix = glm::identity<glm::mat4>();
-		obj.uniforms.modelMatrix = glm::translate(obj.uniforms.modelMatrix, p);
+		obj.indexBuffer.destroy();
+		obj.vertexBuffer.destroy();
+		obj.indexBuffer.release();
+		obj.vertexBuffer.release();
+		objects.erase(id);
+	}
+
+	void updateObject(uint32_t id, const vec3& t, const vec3& r, const vec3& s) {
+		assert(id < objects.size());
+		ObjectInternal& obj = objects[id];
+		obj.uniforms.modelMatrix = _internalComputeModelMatrix(t, r, s);
 		scene.queue.writeBuffer(obj.uniformBuffer, 0, &obj.uniforms.modelMatrix, sizeof(ObjectUniforms));
 	}
 
-	int addSphere(float r, int n) {
+	uint32_t addSphere(float r, int n) {
 		ObjectDescriptor newObj;
 
 		const uint16_t p = 2 * (uint16_t)n;
@@ -647,7 +718,7 @@ namespace tinyrender {
 			float t = 0.0;
 			for (int i = 0; i < 2 * n; i++)
 			{
-				glm::vec3 u = { cos(t) * cos(f), sin(t) * cos(f), sin(f) };
+				vec3 u = { cos(t) * cos(f), sin(t) * cos(f), sin(f) };
 				newObj.normals[k] = u;
 				newObj.vertices[k] = u * r;
 				k++;
@@ -704,11 +775,11 @@ namespace tinyrender {
 		return addObject(newObj);
 	}
 
-	int addPlane(float size, int n) {
+	uint32_t addPlane(float size, int n) {
 		n = n + 1;
-		glm::vec3 a({ -size, 0.0f, -size });
-		glm::vec3 b({ size, 0.0f, size });
-		glm::vec3 step = (b - a) / float(n - 1);
+		vec3 a({ -size, 0.0f, -size });
+		vec3 b({ size, 0.0f, size });
+		vec3 step = (b - a) / float(n - 1);
 		ObjectDescriptor planeObject;
 
 		// Vertices
@@ -716,7 +787,7 @@ namespace tinyrender {
 		{
 			for (int j = 0; j < n; j++)
 			{
-				glm::vec3 v = a + glm::vec3({ step.x * i, 0.f, step.z * j });
+				vec3 v = a + vec3({ step.x * i, 0.f, step.z * j });
 				planeObject.vertices.push_back(v);
 				planeObject.normals.push_back({ 0.f, 1.f, 0.f });
 				planeObject.colors.push_back({ 0.7f, 0.7f, 0.7f });
@@ -748,8 +819,65 @@ namespace tinyrender {
 		return addObject(planeObject);
 	}
 
+	uint32_t addBox(float r) {
+		const vec3 a = vec3(-r);
+		const vec3 b = vec3(r);
 
-	void setCameraEye(const glm::vec3& eye) {
+		ObjectDescriptor newObj;
+
+		// x negative
+		newObj.vertices.push_back({ a.x, a.y, a.z }); newObj.vertices.push_back({ a.x, b.y, a.z });
+		newObj.vertices.push_back({ a.x, b.y, b.z }); newObj.vertices.push_back({ a.x, a.y, b.z });
+		newObj.normals.push_back({ -1, 0, 0 });	newObj.normals.push_back({ -1, 0, 0 });
+		newObj.normals.push_back({ -1, 0, 0 });	newObj.normals.push_back({ -1, 0, 0 });
+		newObj.triangles.push_back(0); newObj.triangles.push_back(1); newObj.triangles.push_back(2);
+		newObj.triangles.push_back(0); newObj.triangles.push_back(2); newObj.triangles.push_back(3);
+
+		// x positive
+		newObj.vertices.push_back({ b.x, a.y, a.z }); newObj.vertices.push_back({ b.x, b.y, a.z });
+		newObj.vertices.push_back({ b.x, b.y, b.z }); newObj.vertices.push_back({ b.x, a.y, b.z });
+		newObj.normals.push_back({ 1, 0, 0 });	newObj.normals.push_back({ 1, 0, 0 });
+		newObj.normals.push_back({ 1, 0, 0 });	newObj.normals.push_back({ 1, 0, 0 });
+		newObj.triangles.push_back(4); newObj.triangles.push_back(5); newObj.triangles.push_back(6);
+		newObj.triangles.push_back(4); newObj.triangles.push_back(6); newObj.triangles.push_back(7);
+
+		// y negative
+		newObj.vertices.push_back({ a.x, a.y, a.z }); newObj.vertices.push_back({ a.x, a.y, b.z });
+		newObj.vertices.push_back({ b.x, a.y, b.z }); newObj.vertices.push_back({ b.x, a.y, a.z });
+		newObj.normals.push_back({ 0, -1, 0 });	newObj.normals.push_back({ 0, -1, 0 });
+		newObj.normals.push_back({ 0, -1, 0 });	newObj.normals.push_back({ 0, -1, 0 });
+		newObj.triangles.push_back(8); newObj.triangles.push_back(9); newObj.triangles.push_back(10);
+		newObj.triangles.push_back(8); newObj.triangles.push_back(10); newObj.triangles.push_back(11);
+
+		// y positive
+		newObj.vertices.push_back({ a.x, b.y, a.z }); newObj.vertices.push_back({ a.x, b.y, b.z });
+		newObj.vertices.push_back({ b.x, b.y, b.z }); newObj.vertices.push_back({ b.x, b.y, a.z });
+		newObj.normals.push_back({ 0, 1, 0 });	newObj.normals.push_back({ 0, 1, 0 });
+		newObj.normals.push_back({ 0, 1, 0 });	newObj.normals.push_back({ 0, 1, 0 });
+		newObj.triangles.push_back(12); newObj.triangles.push_back(13); newObj.triangles.push_back(14);
+		newObj.triangles.push_back(12); newObj.triangles.push_back(14); newObj.triangles.push_back(15);
+
+		// z negative
+		newObj.vertices.push_back({ a.x, a.y, a.z }); newObj.vertices.push_back({ a.x, b.y, a.z });
+		newObj.vertices.push_back({ b.x, b.y, a.z }); newObj.vertices.push_back({ b.x, a.y, a.z });
+		newObj.normals.push_back({ 0, 0, -1 });	newObj.normals.push_back({ 0, 0, -1 });
+		newObj.normals.push_back({ 0, 0, -1 });	newObj.normals.push_back({ 0, 0, -1 });
+		newObj.triangles.push_back(16); newObj.triangles.push_back(17); newObj.triangles.push_back(18);
+		newObj.triangles.push_back(16); newObj.triangles.push_back(18); newObj.triangles.push_back(19);
+
+		// z positive
+		newObj.vertices.push_back({ a.x, a.y, b.z }); newObj.vertices.push_back({ a.x, b.y, b.z });
+		newObj.vertices.push_back({ b.x, b.y, b.z }); newObj.vertices.push_back({ b.x, a.y, b.z });
+		newObj.normals.push_back({ 0, 0, 1 });	newObj.normals.push_back({ 0, 0, 1 });
+		newObj.normals.push_back({ 0, 0, 1 });	newObj.normals.push_back({ 0, 0, 1 });
+		newObj.triangles.push_back(20); newObj.triangles.push_back(21); newObj.triangles.push_back(22);
+		newObj.triangles.push_back(20); newObj.triangles.push_back(22); newObj.triangles.push_back(23);
+
+		return addObject(newObj);
+	}
+
+
+	void setCameraEye(const vec3& eye) {
 		scene.camera.eye = eye;
 	}
 
