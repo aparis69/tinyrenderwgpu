@@ -23,8 +23,8 @@ struct VertexOut {
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
 	var out: VertexOut;
-    out.position = uSceneUniforms.projMatrix * uSceneUniforms.viewMatrix * vec4f(in.position, 1.0f);
-    out.normal = (vec4f(in.normal, 0.0f)).xyz;
+    out.position = uSceneUniforms.projMatrix * uSceneUniforms.viewMatrix * uModelUniforms.modelMatrix * vec4f(in.position, 1.0f);
+    out.normal = (uModelUniforms.modelMatrix * vec4f(in.normal, 0.0f)).xyz;
     return out;
 }
 

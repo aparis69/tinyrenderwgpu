@@ -17,9 +17,9 @@ using namespace wgpu;
 namespace tinyrender {
 
 	struct VertexAttributes {
-		glm::vec3 vertex;
+		glm::vec3 position;
 		glm::vec3 normal;
-	};	
+	};
 
 	struct ObjectUniforms {
 		glm::mat4 modelMatrix;
@@ -27,8 +27,7 @@ namespace tinyrender {
 	static_assert(sizeof(ObjectUniforms) % 16 == 0);
 
 	struct ObjectInternal {
-		Buffer positionBuffer;
-		Buffer normalBuffer;
+		Buffer vertexBuffer;
 		Buffer indexBuffer;
 		uint16_t drawCount;
 
@@ -62,6 +61,7 @@ namespace tinyrender {
 		SceneUniforms uniforms;
 		Buffer uniformBuffer;
 		BindGroup bindGroup;
+		std::vector<BindGroupLayout> bindGroupLayouts;
 	};
 
 	static Scene scene;
@@ -101,7 +101,7 @@ namespace tinyrender {
 		RequiredLimits requiredLimits = Default;
 		requiredLimits.limits.maxVertexAttributes = 3;
 		requiredLimits.limits.maxVertexBuffers = 1;
-		requiredLimits.limits.maxBufferSize = 2000 * sizeof(VertexAttributes);
+		requiredLimits.limits.maxBufferSize = 2000 * (sizeof(VertexAttributes));
 		requiredLimits.limits.maxVertexBufferArrayStride = sizeof(VertexAttributes);
 		requiredLimits.limits.minStorageBufferOffsetAlignment = supportedLimits.limits.minStorageBufferOffsetAlignment;
 		requiredLimits.limits.minUniformBufferOffsetAlignment = supportedLimits.limits.minUniformBufferOffsetAlignment;
@@ -138,47 +138,51 @@ namespace tinyrender {
 	}
 
 	static void _internalSetupRenderPipeline() {
-		ShaderModule shader = _internalLoadShaderModule(
-			RESOURCES_DIR + std::string("/simple.wgsl"), 
+		// Load shader module
+		ShaderModule shaderModule = _internalLoadShaderModule(
+			RESOURCES_DIR + std::string("/simple.wgsl"),
 			scene.device
 		);
 
-		// Create the render pipeline
-		RenderPipelineDescriptor pipelineDesc;
-
-		// Configure the vertex pipeline
+		// Configure the vertex buffer layout
 		VertexBufferLayout vertexBufferLayout;
-		std::vector<VertexAttribute> vertexAttribs(2);
+		std::vector<VertexAttribute> attributes(2);
 
-		// Describe the position attribute
-		vertexAttribs[0].shaderLocation = 0;
-		vertexAttribs[0].format = VertexFormat::Float32x3;
-		vertexAttribs[0].offset = 0;
+		// Position attribute
+		attributes[0].shaderLocation = 0;
+		attributes[0].format = VertexFormat::Float32x3;
+		attributes[0].offset = 0;
 
-		// Describe the normal attribute
-		vertexAttribs[1].shaderLocation = 1;
-		vertexAttribs[1].format = VertexFormat::Float32x3;
-		vertexAttribs[1].offset = offsetof(VertexAttributes, normal);
+		// Normal attribute
+		attributes[1].shaderLocation = 1;
+		attributes[1].format = VertexFormat::Float32x3;
+		attributes[1].offset = sizeof(glm::vec3); // offset of normal
 
-		vertexBufferLayout.attributeCount = uint32_t(vertexAttribs.size());
-		vertexBufferLayout.attributes = vertexAttribs.data();
+		vertexBufferLayout.attributeCount = 2;
+		vertexBufferLayout.attributes = attributes.data();
 		vertexBufferLayout.arrayStride = sizeof(VertexAttributes);
 		vertexBufferLayout.stepMode = VertexStepMode::Vertex;
 
+		// Create the render pipeline desc
+		RenderPipelineDescriptor pipelineDesc;
+
+		// Vertex state
 		pipelineDesc.vertex.bufferCount = 1;
 		pipelineDesc.vertex.buffers = &vertexBufferLayout;
-		pipelineDesc.vertex.module = shader;
+		pipelineDesc.vertex.module = shaderModule;
 		pipelineDesc.vertex.entryPoint = "vs_main";
 		pipelineDesc.vertex.constantCount = 0;
 		pipelineDesc.vertex.constants = nullptr;
 
+		// Primitive topology: triangles only
 		pipelineDesc.primitive.topology = PrimitiveTopology::TriangleList;
 		pipelineDesc.primitive.stripIndexFormat = IndexFormat::Undefined;
 		pipelineDesc.primitive.frontFace = FrontFace::CCW;
 		pipelineDesc.primitive.cullMode = CullMode::None;
 
+		// Fragment state
 		FragmentState fragmentState;
-		fragmentState.module = shader;
+		fragmentState.module = shaderModule;
 		fragmentState.entryPoint = "fs_main";
 		fragmentState.constantCount = 0;
 		fragmentState.constants = nullptr;
@@ -200,7 +204,7 @@ namespace tinyrender {
 		fragmentState.targets = &colorTarget;
 		pipelineDesc.fragment = &fragmentState;
 
-		// We setup a depth buffer state for the render pipeline
+		// Depth buffer
 		DepthStencilState depthStencilState = Default;
 		depthStencilState.depthCompare = CompareFunction::Less;
 		depthStencilState.depthWriteEnabled = true;
@@ -210,22 +214,23 @@ namespace tinyrender {
 		depthStencilState.stencilWriteMask = 0;
 		pipelineDesc.depthStencil = &depthStencilState;
 
+		// Multisample
 		pipelineDesc.multisample.count = 1;
 		pipelineDesc.multisample.mask = ~0u;
 		pipelineDesc.multisample.alphaToCoverageEnabled = false;
 
-		// Create a bind group layout
+		// Layout 
+		scene.bindGroupLayouts = {};
+		BindGroupLayoutDescriptor bindGroupLayoutDesc{};
+
 		BindGroupLayoutEntry bindingLayout = Default;
 		bindingLayout.binding = 0;
 		bindingLayout.visibility = ShaderStage::Vertex | ShaderStage::Fragment;
 		bindingLayout.buffer.type = BufferBindingType::Uniform;
 		bindingLayout.buffer.minBindingSize = sizeof(SceneUniforms);
-
-		std::vector<BindGroupLayout> bindGroupLayouts;
-		BindGroupLayoutDescriptor bindGroupLayoutDesc{};
 		bindGroupLayoutDesc.entryCount = 1;
 		bindGroupLayoutDesc.entries = &bindingLayout;
-		bindGroupLayouts.push_back(scene.device.createBindGroupLayout(bindGroupLayoutDesc));
+		scene.bindGroupLayouts.push_back(scene.device.createBindGroupLayout(bindGroupLayoutDesc));
 
 		bindingLayout.binding = 0;
 		bindingLayout.visibility = ShaderStage::Vertex | ShaderStage::Fragment;
@@ -233,20 +238,21 @@ namespace tinyrender {
 		bindingLayout.buffer.minBindingSize = sizeof(ObjectUniforms);
 		bindGroupLayoutDesc.entryCount = 1;
 		bindGroupLayoutDesc.entries = &bindingLayout;
-		bindGroupLayouts.push_back(scene.device.createBindGroupLayout(bindGroupLayoutDesc));
+		scene.bindGroupLayouts.push_back(scene.device.createBindGroupLayout(bindGroupLayoutDesc));
 
-		// Create the pipeline layout
+		// Actually create the pipeline
 		PipelineLayoutDescriptor layoutDesc{};
-		layoutDesc.bindGroupLayoutCount = 2;
-		layoutDesc.bindGroupLayouts = (WGPUBindGroupLayout*)&bindGroupLayouts[0];
-		PipelineLayout layout = scene.device.createPipelineLayout(layoutDesc);
-		pipelineDesc.layout = layout;
-
+		layoutDesc.bindGroupLayoutCount = scene.bindGroupLayouts.size();
+		layoutDesc.bindGroupLayouts = (WGPUBindGroupLayout*)scene.bindGroupLayouts.data();
+		pipelineDesc.layout = scene.device.createPipelineLayout(layoutDesc);
 		scene.renderPipeline = scene.device.createRenderPipeline(pipelineDesc);
 
-		shader.release();
+		// Release shader module, no need anymore
+		shaderModule.release();
+	}
 
-		// Create the depth texture
+	static void _internalSetupDepthTexture() {
+		// Create the texture
 		TextureDescriptor depthTextureDesc;
 		depthTextureDesc.dimension = TextureDimension::_2D;
 		depthTextureDesc.format = TextureFormat::Depth24Plus;
@@ -258,7 +264,7 @@ namespace tinyrender {
 		depthTextureDesc.viewFormats = (WGPUTextureFormat*)&TextureFormat::Depth24Plus;
 		depthTexture = scene.device.createTexture(depthTextureDesc);
 
-		// Create the view of the depth texture manipulated by the rasterizer
+		// Create the view of the texture manipulated by the rasterizer
 		TextureViewDescriptor depthTextureViewDesc;
 		depthTextureViewDesc.aspect = TextureAspect::DepthOnly;
 		depthTextureViewDesc.baseArrayLayer = 0;
@@ -268,25 +274,27 @@ namespace tinyrender {
 		depthTextureViewDesc.dimension = TextureViewDimension::_2D;
 		depthTextureViewDesc.format = TextureFormat::Depth24Plus;
 		depthTextureView = depthTexture.createView(depthTextureViewDesc);
+	}
 
-		// Uniform buffer
+	static void _internalSetupSceneData() {
+		// Buffer
 		BufferDescriptor bufferDesc;
 		bufferDesc.size = sizeof(SceneUniforms);
 		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Uniform;
 		bufferDesc.mappedAtCreation = false;
 		scene.uniformBuffer = scene.device.createBuffer(bufferDesc);
 
-		// Create a binding
+		// Binding
 		BindGroupEntry binding{};
 		binding.binding = 0;
 		binding.buffer = scene.uniformBuffer;
 		binding.offset = 0;
 		binding.size = sizeof(SceneUniforms);
 
-		// A bind group contains one or multiple bindings
+		// Associated bind group with its layout
 		BindGroupDescriptor bindGroupDesc;
-		bindGroupDesc.layout = bindGroupLayouts[0];
-		bindGroupDesc.entryCount = bindGroupLayoutDesc.entryCount;
+		bindGroupDesc.layout = scene.bindGroupLayouts[0];
+		bindGroupDesc.entryCount = 1;
 		bindGroupDesc.entries = &binding;
 		scene.bindGroup = scene.device.createBindGroup(bindGroupDesc);
 	}
@@ -294,24 +302,25 @@ namespace tinyrender {
 	static int _internalCreateObject(const ObjectDescriptor& objDesc) {
 		ObjectInternal newObj;
 
-		// Position buffer
-		BufferDescriptor bufferDesc;
-		bufferDesc.size = objDesc.vertices.size() * sizeof(glm::vec3);
-		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Vertex;
-		bufferDesc.mappedAtCreation = false;
-		newObj.positionBuffer = scene.device.createBuffer(bufferDesc);
-		scene.queue.writeBuffer(newObj.positionBuffer, 0, objDesc.vertices.data(), bufferDesc.size);
+		// Compute the flattened buffer with interleaved position & normal
+		std::vector<glm::vec3> flattenedData(objDesc.vertices.size() * 2);
+		for (int i = 0; i < objDesc.vertices.size(); i++) {
+			flattenedData[(i * 2) + 0] = objDesc.vertices[i];
+			flattenedData[(i * 2) + 1] = objDesc.normals[i];
+		}
 
-		// Normal buffer
-		bufferDesc.size = objDesc.normals.size() * sizeof(glm::vec3);
+		// Vertex buffer (position + normal)
+		BufferDescriptor bufferDesc;
+		bufferDesc.size = flattenedData.size() * sizeof(glm::vec3);
 		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Vertex;
 		bufferDesc.mappedAtCreation = false;
-		newObj.normalBuffer = scene.device.createBuffer(bufferDesc);
-		scene.queue.writeBuffer(newObj.normalBuffer, 0, objDesc.normals.data(), bufferDesc.size);
+		newObj.vertexBuffer = scene.device.createBuffer(bufferDesc);
+		scene.queue.writeBuffer(newObj.vertexBuffer, 0, flattenedData.data(), bufferDesc.size);
 
 		// Triangle buffer
 		newObj.drawCount = static_cast<uint16_t>(objDesc.triangles.size());
 		bufferDesc.size = objDesc.triangles.size() * sizeof(uint16_t);
+		bufferDesc.size = (bufferDesc.size + 3) & ~3; // round up to the next multiple of 4
 		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Index;
 		newObj.indexBuffer = scene.device.createBuffer(bufferDesc);
 		scene.queue.writeBuffer(newObj.indexBuffer, 0, objDesc.triangles.data(), bufferDesc.size);
@@ -321,6 +330,7 @@ namespace tinyrender {
 		newObj.uniforms.modelMatrix = glm::translate(newObj.uniforms.modelMatrix, objDesc.translation);
 		bufferDesc.size = sizeof(ObjectUniforms);
 		bufferDesc.usage = BufferUsage::CopyDst | BufferUsage::Uniform;
+		bufferDesc.mappedAtCreation = false;
 		newObj.uniformBuffer = scene.device.createBuffer(bufferDesc);
 		scene.queue.writeBuffer(newObj.uniformBuffer, 0, &newObj.uniforms.modelMatrix, bufferDesc.size);
 
@@ -359,12 +369,14 @@ namespace tinyrender {
 	bool init(const char* windowName, int width, int height) {
 		scene.width = width;
 		scene.height = height;
+		std::cout << "Initialization" << std::endl;
 
 		// GLFW
 		if (!glfwInit()) {
 			std::cerr << "Error: could not initialize GLFW" << std::endl;
 			return false;
 		}
+		std::cout << "--- GLFW" << std::endl;
 
 		// Window
 		scene.window = glfwCreateWindow(width, height, windowName, nullptr, nullptr);
@@ -373,6 +385,7 @@ namespace tinyrender {
 			glfwTerminate();
 			return false;
 		}
+		std::cout << "--- window" << std::endl;
 
 		// Instance
 		Instance instance = wgpuCreateInstance(nullptr);
@@ -384,19 +397,16 @@ namespace tinyrender {
 		adapterOpts.compatibleSurface = scene.surface;
 		adapterOpts.powerPreference = WGPUPowerPreference_HighPerformance;
 		Adapter adapter = requestAdapterSync(instance, &adapterOpts);
-		std::cout << "Got adapter." << std::endl;
-
-		// Printing adapter info
+		std::cout << "--- adapter" << std::endl;
 		AdapterProperties properties = {};
 		properties.nextInChain = nullptr;
 		wgpuAdapterGetProperties(adapter, &properties);
 		if (properties.name) {
-			std::cout << "Adapter name: " << properties.name << std::endl;
+			std::cout << "--- adapter name: " << properties.name << std::endl;
 		}
 		wgpuInstanceRelease(instance);
 
 		// Device
-		std::cout << "Requesting device..." << std::endl;
 		DeviceDescriptor deviceDesc = {};
 		deviceDesc.nextInChain = nullptr;
 		deviceDesc.label = "TinyRenderDevice";
@@ -406,32 +416,32 @@ namespace tinyrender {
 		deviceDesc.defaultQueue.nextInChain = nullptr;
 		deviceDesc.defaultQueue.label = "Default queue";
 		deviceDesc.deviceLostCallbackInfo.callback = [](
-				WGPUDevice const* /*device*/, 
-				WGPUDeviceLostReason reason, 
-				char const* message, 
-				void* /*userdata*/
+			WGPUDevice const* /*device*/,
+			WGPUDeviceLostReason reason,
+			char const* message,
+			void* /*userdata*/
 			) {
-			std::cout << "Device lost: reason " << reason;
-			if (message) {
-				std::cout << " (" << message << ")";
-			}
-			std::cout << std::endl;
-		};
+				std::cout << "Device lost: reason " << reason;
+				if (message) {
+					std::cout << " (" << message << ")";
+				}
+				std::cout << std::endl;
+			};
 		scene.device = requestDeviceSync(adapter, &deviceDesc);
-		std::cout << "Got device." << std::endl;
+		std::cout << "-- device" << std::endl;
 
 		// Device error callback
 		auto onDeviceError = [](
-				WGPUErrorType type, 
-				char const* message, 
-				void* /* pUserData */
+			WGPUErrorType type,
+			char const* message,
+			void* /* pUserData */
 			) {
-			std::cout << "Uncaptured device error: type " << type;
-			if (message) {
-				std::cout << " (" << message << ")";
-			}
-			std::cout << std::endl;
-		};
+				std::cout << "Uncaptured device error: type " << type;
+				if (message) {
+					std::cout << " (" << message << ")";
+				}
+				std::cout << std::endl;
+			};
 		wgpuDeviceSetUncapturedErrorCallback(scene.device, onDeviceError, nullptr);
 
 		// Queue
@@ -454,15 +464,21 @@ namespace tinyrender {
 		config.presentMode = PresentMode::Fifo;
 		config.alphaMode = CompositeAlphaMode::Auto;
 		scene.surface.configure(config);
-		std::cout << "Got surface." << std::endl;
+		std::cout << "-- surface" << std::endl;
 
 		// Render pipeline
 		_internalSetupRenderPipeline();
-		std::cout << "Got render pipeline." << std::endl;
+		std::cout << "-- render pipeline" << std::endl;
+
+		_internalSetupDepthTexture();
+		std::cout << "-- depth texture" << std::endl;
+
+		_internalSetupSceneData();
+		std::cout << "-- scene buffer and bind groups" << std::endl;
 
 		return true;
 	}
-	
+
 	bool shouldQuit() {
 		return glfwWindowShouldClose(scene.window);
 	}
@@ -470,7 +486,7 @@ namespace tinyrender {
 	void update() {
 		glfwPollEvents();
 	}
-	
+
 	void render() {
 		// Get the next target texture view
 		TextureView targetView = _internalNextSurfaceTextureView();
@@ -521,9 +537,9 @@ namespace tinyrender {
 			scene.camera.up
 		);
 		scene.queue.writeBuffer(
-			scene.uniformBuffer, 
-			0, 
-			&scene.uniforms, 
+			scene.uniformBuffer,
+			0,
+			&scene.uniforms,
 			sizeof(SceneUniforms)
 		);
 
@@ -531,17 +547,17 @@ namespace tinyrender {
 		RenderPassEncoder renderPass = encoder.beginRenderPass(renderPassDesc);
 		renderPass.setPipeline(scene.renderPipeline);
 		for (auto& obj : objects) {
-			renderPass.setVertexBuffer(0, 
-				obj.positionBuffer, 
-				0, 
-				obj.positionBuffer.getSize()
+			renderPass.setVertexBuffer(0,
+				obj.vertexBuffer,
+				0,
+				obj.vertexBuffer.getSize()
 			);
-			renderPass.setIndexBuffer(obj.indexBuffer, 
-				IndexFormat::Uint16, 
-				0, 
+			renderPass.setIndexBuffer(obj.indexBuffer,
+				IndexFormat::Uint16,
+				0,
 				obj.indexBuffer.getSize()
 			);
-			
+
 			renderPass.setBindGroup(0, scene.bindGroup, 0, nullptr);
 			renderPass.setBindGroup(1, obj.bindGroup, 0, nullptr);
 
@@ -573,10 +589,8 @@ namespace tinyrender {
 		for (auto& obj : objects) {
 			obj.indexBuffer.destroy();
 			obj.indexBuffer.release();
-			obj.positionBuffer.destroy();
-			obj.positionBuffer.release();
-			obj.normalBuffer.destroy();
-			obj.normalBuffer.release();
+			obj.vertexBuffer.destroy();
+			obj.vertexBuffer.release();
 		}
 
 		depthTexture.destroy();
@@ -596,14 +610,14 @@ namespace tinyrender {
 	int addObject(const ObjectDescriptor& objDesc) {
 		return _internalCreateObject(objDesc);
 	}
-	
+
 	void removeObject(int /*id*/) {
 
 	}
 
 	void updateObject(int id, const glm::vec3& p, const glm::vec3& /*s*/, const glm::vec3& /*r*/) {
 		assert(id < objects.size());
-		auto obj = objects[id];
+		ObjectInternal& obj = objects[id];
 		obj.uniforms.modelMatrix = glm::identity<glm::mat4>();
 		obj.uniforms.modelMatrix = glm::translate(obj.uniforms.modelMatrix, p);
 		scene.queue.writeBuffer(obj.uniformBuffer, 0, &obj.uniforms.modelMatrix, sizeof(ObjectUniforms));
@@ -655,16 +669,16 @@ namespace tinyrender {
 		for (uint16_t i = 0; i < 2 * n; i++)
 		{
 			newObj.triangles.push_back(s - 1);
-			newObj.triangles.push_back(i);
 			newObj.triangles.push_back((i + 1) % p);
+			newObj.triangles.push_back(i);
 		}
 
 		// North cap
 		for (uint16_t i = 0; i < 2 * n; i++)
 		{
 			newObj.triangles.push_back(s - 2);
-			newObj.triangles.push_back(2 * (uint16_t)n * ((uint16_t)n - 2) + (i + 1) % p);
 			newObj.triangles.push_back(2 * (uint16_t)n * ((uint16_t)n - 2) + i);
+			newObj.triangles.push_back(2 * (uint16_t)n * ((uint16_t)n - 2) + (i + 1) % p);
 		}
 
 		// Sphere
@@ -678,16 +692,60 @@ namespace tinyrender {
 				const uint16_t v3 = j * p + i;
 
 				newObj.triangles.push_back(v0);
-				newObj.triangles.push_back(v2);
 				newObj.triangles.push_back(v1);
+				newObj.triangles.push_back(v2);
 
 				newObj.triangles.push_back(v0);
-				newObj.triangles.push_back(v3);
 				newObj.triangles.push_back(v2);
+				newObj.triangles.push_back(v3);
 			}
 		}
 
 		return addObject(newObj);
+	}
+
+	int addPlane(float size, int n) {
+		n = n + 1;
+		glm::vec3 a({ -size, 0.0f, -size });
+		glm::vec3 b({ size, 0.0f, size });
+		glm::vec3 step = (b - a) / float(n - 1);
+		ObjectDescriptor planeObject;
+
+		// Vertices
+		for (int i = 0; i < n; i++)
+		{
+			for (int j = 0; j < n; j++)
+			{
+				glm::vec3 v = a + glm::vec3({ step.x * i, 0.f, step.z * j });
+				planeObject.vertices.push_back(v);
+				planeObject.normals.push_back({ 0.f, 1.f, 0.f });
+				planeObject.colors.push_back({ 0.7f, 0.7f, 0.7f });
+			}
+		}
+
+		// Triangles
+		for (int i = 0; i < n - 1; i++)
+		{
+			for (int j = 0; j < n - 1; j++)
+			{
+				int v0 = (j * n) + i;
+				int v1 = (j * n) + i + 1;
+				int v2 = ((j + 1) * n) + i;
+				int v3 = ((j + 1) * n) + i + 1;
+
+				// tri 0
+				planeObject.triangles.push_back((uint16_t)v0);
+				planeObject.triangles.push_back((uint16_t)v1);
+				planeObject.triangles.push_back((uint16_t)v2);
+
+				// tri 1
+				planeObject.triangles.push_back((uint16_t)v2);
+				planeObject.triangles.push_back((uint16_t)v1);
+				planeObject.triangles.push_back((uint16_t)v3);
+			}
+		}
+
+		return addObject(planeObject);
 	}
 
 

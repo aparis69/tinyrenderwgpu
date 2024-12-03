@@ -38,5 +38,6 @@ namespace tinyrender {
 
 	// Primitives
 	int addSphere(float r, int n);
+	int addPlane(float size, int n);
 
 } // namespace tinyrender
