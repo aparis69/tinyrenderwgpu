@@ -64,6 +64,10 @@ namespace tinyrender {
 		RenderPipeline renderPipeline;
 		Camera camera;
 
+		vec2 mouseLastPosition;
+		int currentMouseButton = -1;
+		float mouseSensitivity = 0.01f;
+
 		SceneUniforms uniforms;
 		Buffer uniformBuffer;
 		BindGroup bindGroup;
@@ -81,6 +85,37 @@ namespace tinyrender {
 		ret = ret * glm::eulerAngleXYZ(glm::radians(r.x), glm::radians(r.y), glm::radians(r.z));
 		ret = glm::scale(ret, s);
 		return ret;
+	}
+
+	static void _internalApplyCameraMove(float x, float y, float z) {
+		if (x != 0.0f) {
+			Camera& cam = scene.camera;
+
+			vec3 f = cam.at - cam.eye;
+			vec3 s = glm::cross(cam.up, f);
+			f = vec3(f.x * cos(x) - f.z * sin(x), f.y, f.x * sin(x) + f.z * cos(x));
+			s = vec3(s.x * cos(x) - s.z * sin(x), 0.0, s.x * sin(x) + s.z * cos(x));
+
+			cam.up = glm::normalize(glm::cross(s, -f));
+			cam.eye = cam.at - f;
+		}
+		if (y != 0.0f) {
+			Camera& cam = scene.camera;
+
+			vec3 f = cam.at - cam.eye;
+			float length = glm::length(f);
+			f /= length;
+			vec3 s = glm::normalize(glm::cross(cam.up, f));
+			f = f * cos(y) + cam.up * sin(y);
+
+			cam.up = glm::cross(f, s);
+			cam.eye = cam.at - f * length;
+		}
+		if (z != 0.0f) {
+			Camera& cam = scene.camera;
+			vec3 viewDir = cam.at - cam.eye;
+			cam.eye += viewDir * float(z) * 0.025f;
+		}
 	}
 
 	static TextureView _internalNextSurfaceTextureView() {
@@ -326,11 +361,16 @@ namespace tinyrender {
 
 		glfwSetMouseButtonCallback(scene.window, [](
 			GLFWwindow* /*window*/, 			
-			int /*button*/, 
-			int /*action*/,
+			int button, 
+			int action,
 			int /*mods*/
 			) {
-
+				if (action == GLFW_PRESS) {
+					scene.currentMouseButton = button;
+				}
+				else {
+					scene.currentMouseButton = -1;
+				}
 			}
 		);
 
@@ -350,9 +390,7 @@ namespace tinyrender {
 			double /*x*/,
 			double y
 			) {
-				Camera& cam = scene.camera;
-				vec3 viewDir = cam.at - cam.eye;
-				cam.eye += viewDir * float(y) * 0.025f;
+				_internalApplyCameraMove(0.0f, 0.0f, (float)y);
 			}
 		);
 	}
@@ -549,6 +587,19 @@ namespace tinyrender {
 
 	void update() {
 		glfwPollEvents();
+
+		vec2 mousePos = getMousePosition();
+		float x = 0.0f, y = 0.0f;
+		if (scene.currentMouseButton == GLFW_MOUSE_BUTTON_LEFT) {
+			float xoffset = float(mousePos.x) - scene.mouseLastPosition.x;
+			// Reversed since y-coordinates
+			float yoffset = scene.mouseLastPosition.y - float(mousePos.y);
+			x += (xoffset * scene.mouseSensitivity);
+			y += (yoffset * scene.mouseSensitivity);
+		}
+		_internalApplyCameraMove(x, y, 0.0f);
+
+		scene.mouseLastPosition = mousePos;
 	}
 
 	void render() {
@@ -879,6 +930,12 @@ namespace tinyrender {
 
 	void setCameraEye(const vec3& eye) {
 		scene.camera.eye = eye;
+	}
+
+	vec2 getMousePosition() {
+		double x, y;
+		glfwGetCursorPos(scene.window, &x, &y);
+		return vec2(float(x), float(y));
 	}
 
 } // namespace tinyrender

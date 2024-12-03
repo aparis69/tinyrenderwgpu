@@ -45,7 +45,8 @@ namespace tinyrender {
 		const glm::vec3& s
 	);
 
-	// Camera
+	// Utilities
+	glm::vec2 getMousePosition();
 	void setCameraEye(
 		const glm::vec3& eye
 	);

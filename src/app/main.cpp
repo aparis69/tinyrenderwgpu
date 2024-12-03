@@ -65,8 +65,8 @@ void ExampleRotatedBoxes() {
 
 int main(int /*argc*/, const char** /*argv*/) {
 	//ExampleEmptyWindow();
-	ExampleSphere();
+	//ExampleSphere();
 	//ExampleManySpheres();
-	//ExampleRotatedBoxes();
+	ExampleRotatedBoxes();
 	return 0;
 }
