@@ -495,7 +495,7 @@ namespace tinyrender {
 		RequestAdapterOptions adapterOpts = {};
 		adapterOpts.nextInChain = nullptr;
 		adapterOpts.compatibleSurface = scene.surface;
-		//adapterOpts.powerPreference = WGPUPowerPreference_HighPerformance;
+		adapterOpts.powerPreference = WGPUPowerPreference_HighPerformance;
 		Adapter adapter = requestAdapterSync(instance, &adapterOpts);
 		std::cout << "--- adapter" << std::endl;
 		AdapterProperties properties = {};
@@ -598,6 +598,9 @@ namespace tinyrender {
 			y += (yoffset * scene.mouseSensitivity);
 		}
 		_internalApplyCameraMove(x, y, 0.0f);
+
+		// Auto rotation test
+		//_internalApplyCameraMove(0.001f, 0.0f, 0.0f);
 
 		scene.mouseLastPosition = mousePos;
 	}
