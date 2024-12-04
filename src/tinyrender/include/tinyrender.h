@@ -38,7 +38,8 @@
  *   -Screen-space panning using middle button + move
  *   -Zoom using mouse scroll
  *
- * Dependencies
+ * Dependencies (all are included either in CMake or in the source tree)
+ *	 -Dear imgui
  *   -WebGPU (Dawn implementation)
  *   -GLFW
  *   -GLM

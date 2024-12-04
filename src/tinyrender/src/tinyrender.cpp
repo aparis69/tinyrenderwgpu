@@ -8,6 +8,11 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/euler_angles.hpp>
 
+#include <imgui/imgui.h>
+
+#include <imgui/backends/imgui_impl_glfw.h>
+#include <imgui/backends/imgui_impl_wgpu.h>
+
 #include <iostream>
 #include <fstream>
 #include <filesystem>
@@ -395,6 +400,33 @@ namespace tinyrender {
 		);
 	}
 
+	static void _internalSetupImgui() {
+		IMGUI_CHECKVERSION();
+		ImGui::CreateContext();
+
+		ImGui_ImplGlfw_InitForOther(scene.window, true);
+		ImGui_ImplWGPU_InitInfo info;
+		info.Device = scene.device;
+		info.NumFramesInFlight = 3;
+		info.DepthStencilFormat = depthTexture.getFormat();
+		info.RenderTargetFormat = TextureFormat::BGRA8Unorm;
+		info.PipelineMultisampleState.count = 1;
+		info.PipelineMultisampleState.mask = ~0u;
+		info.PipelineMultisampleState.alphaToCoverageEnabled = false;
+		ImGui_ImplWGPU_Init(&info);
+
+		// Adapt font size to screen DPI
+		glm::vec2 contentScale;
+		glfwGetWindowContentScale(scene.window, &contentScale.x, &contentScale.y);
+		glm::ivec2 framebufferSize;
+		glfwGetFramebufferSize(scene.window, &framebufferSize.x, &framebufferSize.y);
+		glm::ivec2 windowSize;
+		glfwGetWindowSize(scene.window, &windowSize.x, &windowSize.y);
+		glm::vec2 dpiScale = glm::vec2(framebufferSize) / glm::vec2(windowSize);
+		glm::vec2 imguiScale = contentScale / dpiScale;
+		ImGui::GetIO().FontGlobalScale = std::min(imguiScale.x, imguiScale.y);
+	}
+
 	static uint32_t _internalCreateObject(const ObjectDescriptor& objDesc) {
 		ObjectInternal newObj;
 
@@ -463,6 +495,15 @@ namespace tinyrender {
 		uint32_t id = uint32_t(objects.size());
 		objects.insert({ id, newObj });
 		return id;
+	}
+
+	static void _internalRenderGui() {
+		ImGui::Begin("tinyrenderwgpu");
+		{
+			ImGui::Text("Dt= %.1f ms", ImGui::GetIO().DeltaTime * 1000.0f);
+			ImGui::Text("FPS= %.1f", ImGui::GetIO().Framerate);
+		}
+		ImGui::End();
 	}
 
 
@@ -578,6 +619,9 @@ namespace tinyrender {
 		_internalSetupCallbacks();
 		std::cout << "-- callbacks" << std::endl;
 
+		_internalSetupImgui();
+		std::cout << "-- imgui" << std::endl;
+
 		return true;
 	}
 
@@ -597,15 +641,20 @@ namespace tinyrender {
 			x += (xoffset * scene.mouseSensitivity);
 			y += (yoffset * scene.mouseSensitivity);
 		}
-		_internalApplyCameraMove(x, y, 0.0f);
+		if (!ImGui::GetIO().WantCaptureMouse)
+			_internalApplyCameraMove(x, y, 0.0f);
 
 		// Auto rotation test
-		//_internalApplyCameraMove(0.001f, 0.0f, 0.0f);
+		_internalApplyCameraMove(0.001f, 0.0f, 0.0f);
 
 		scene.mouseLastPosition = mousePos;
 	}
 
 	void render() {
+		ImGui_ImplWGPU_NewFrame();
+		ImGui_ImplGlfw_NewFrame();
+		ImGui::NewFrame();
+
 		// Get the next target texture view
 		TextureView targetView = _internalNextSurfaceTextureView();
 		if (!targetView) return;
@@ -683,6 +732,12 @@ namespace tinyrender {
 			renderPass.drawIndexed(obj.drawCount, 1, 0, 0, 0);
 		}
 
+		_internalRenderGui();
+
+		ImGui::EndFrame();
+		ImGui::Render();
+		ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), renderPass);
+
 		renderPass.end();
 		renderPass.release();
 
@@ -712,6 +767,9 @@ namespace tinyrender {
 			obj.indexBuffer.release();
 			obj.vertexBuffer.release();
 		}
+
+		ImGui_ImplGlfw_Shutdown();
+		ImGui_ImplWGPU_Shutdown();
 
 		depthTexture.destroy();
 		depthTexture.release();
