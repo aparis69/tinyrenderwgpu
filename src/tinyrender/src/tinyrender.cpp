@@ -602,7 +602,7 @@ namespace tinyrender {
 		config.viewFormatCount = 0;
 		config.viewFormats = nullptr;
 		config.device = scene.device;
-		config.presentMode = PresentMode::FifoRelaxed;
+		config.presentMode = PresentMode::Fifo;
 		config.alphaMode = CompositeAlphaMode::Auto;
 		scene.surface.configure(config);
 		std::cout << "-- surface" << std::endl;
@@ -748,6 +748,7 @@ namespace tinyrender {
 		encoder.release();
 
 		scene.queue.submit(1, &command);
+		ImGui_ImplGlfw_Sleep(16); // TODO: fix this
 		command.release();
 
 		// At the end of the frame
