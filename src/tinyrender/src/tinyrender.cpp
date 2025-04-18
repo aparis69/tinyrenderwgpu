@@ -53,13 +53,6 @@ namespace tinyrender {
 		BindGroup bindGroup;
 	};
 
-	struct Camera {
-		float zNear = 0.1f, zFar = 500.0f;
-		vec3 eye = vec3(3, -3, 0);
-		vec3 at = vec3(0, 0, 0);
-		vec3 up = vec3(0, 0, 1);
-	};
-
 	struct Scene {
 		GLFWwindow* window;
 		int width, height;
@@ -67,11 +60,10 @@ namespace tinyrender {
 		Queue queue;
 		Surface surface;
 		RenderPipeline renderPipeline;
-		Camera camera;
+		Options options;
 
-		vec2 mouseLastPosition;
+		glm::vec2 mouseLastPosition = glm::vec2(0);
 		int currentMouseButton = -1;
-		float mouseSensitivity = 0.01f;
 
 		SceneUniforms uniforms;
 		Buffer uniformBuffer;
@@ -94,32 +86,32 @@ namespace tinyrender {
 
 	static void _internalApplyCameraMove(float x, float y, float z) {
 		if (x != 0.0f) {
-			Camera& cam = scene.camera;
+			Options& opt = scene.options;
 
-			vec3 f = cam.at - cam.eye;
-			vec3 s = glm::cross(cam.up, f);
+			vec3 f = opt.at - opt.eye;
+			vec3 s = glm::cross(opt.up, f);
 			f = vec3(f.x * cos(x) - f.z * sin(x), f.y, f.x * sin(x) + f.z * cos(x));
 			s = vec3(s.x * cos(x) - s.z * sin(x), 0.0, s.x * sin(x) + s.z * cos(x));
 
-			cam.up = glm::normalize(glm::cross(s, -f));
-			cam.eye = cam.at - f;
+			opt.up = glm::normalize(glm::cross(s, -f));
+			opt.eye = opt.at - f;
 		}
 		if (y != 0.0f) {
-			Camera& cam = scene.camera;
+			Options& opt = scene.options;
 
-			vec3 f = cam.at - cam.eye;
+			vec3 f = opt.at - opt.eye;
 			float length = glm::length(f);
 			f /= length;
-			vec3 s = glm::normalize(glm::cross(cam.up, f));
-			f = f * cos(y) + cam.up * sin(y);
+			vec3 s = glm::normalize(glm::cross(opt.up, f));
+			f = f * cos(y) + opt.up * sin(y);
 
-			cam.up = glm::cross(f, s);
-			cam.eye = cam.at - f * length;
+			opt.up = glm::cross(f, s);
+			opt.eye = opt.at - f * length;
 		}
 		if (z != 0.0f) {
-			Camera& cam = scene.camera;
-			vec3 viewDir = cam.at - cam.eye;
-			cam.eye += viewDir * float(z) * 0.025f;
+			Options& opt = scene.options;
+			vec3 viewDir = opt.at - opt.eye;
+			opt.eye += viewDir * float(z) * 0.025f;
 		}
 	}
 
@@ -638,8 +630,8 @@ namespace tinyrender {
 			float xoffset = float(mousePos.x) - scene.mouseLastPosition.x;
 			// Reversed since y-coordinates
 			float yoffset = scene.mouseLastPosition.y - float(mousePos.y);
-			x += (xoffset * scene.mouseSensitivity);
-			y += (yoffset * scene.mouseSensitivity);
+			x += (xoffset * scene.options.mouseSensitivity);
+			y += (yoffset * scene.options.mouseSensitivity);
 		}
 		if (!ImGui::GetIO().WantCaptureMouse)
 			_internalApplyCameraMove(x, y, 0.0f);
@@ -695,13 +687,13 @@ namespace tinyrender {
 		scene.uniforms.projMatrix = glm::perspective(
 			glm::radians(45.0f),
 			float(scene.width) / float(scene.height),
-			scene.camera.zNear,
-			scene.camera.zFar
+			scene.options.zNear,
+			scene.options.zFar
 		);
 		scene.uniforms.viewMatrix = glm::lookAt(
-			scene.camera.eye,
-			scene.camera.at,
-			scene.camera.up
+			scene.options.eye,
+			scene.options.at,
+			scene.options.up
 		);
 		scene.queue.writeBuffer(
 			scene.uniformBuffer,
@@ -785,6 +777,10 @@ namespace tinyrender {
 		glfwTerminate();
 	}
 
+	Options& getOptions() {
+		return scene.options;
+	}
+
 
 	uint32_t addObject(const ObjectDescriptor& objDesc) {
 		return _internalCreateObject(objDesc);
@@ -816,8 +812,8 @@ namespace tinyrender {
 		newObj.normals.resize(s);
 
 		// Create set of vertices
-		const float Pi = 3.14159265358979323846f;
-		const float HalfPi = Pi / 2.0f;
+		const float Pi = glm::pi<float>();
+		const float HalfPi = glm::half_pi<float>();
 		const float dt = Pi / float(n);
 		const float df = Pi / float(n);
 		int k = 0;
@@ -850,26 +846,22 @@ namespace tinyrender {
 		newObj.triangles.reserve(4 * n * (n - 1) * 3);
 
 		// South cap
-		for (uint16_t i = 0; i < 2 * n; i++)
-		{
+		for (uint16_t i = 0; i < 2 * n; i++) {
 			newObj.triangles.push_back(s - 1);
 			newObj.triangles.push_back((i + 1) % p);
 			newObj.triangles.push_back(i);
 		}
 
 		// North cap
-		for (uint16_t i = 0; i < 2 * n; i++)
-		{
+		for (uint16_t i = 0; i < 2 * n; i++) {
 			newObj.triangles.push_back(s - 2);
 			newObj.triangles.push_back(2 * (uint16_t)n * ((uint16_t)n - 2) + i);
 			newObj.triangles.push_back(2 * (uint16_t)n * ((uint16_t)n - 2) + (i + 1) % p);
 		}
 
 		// Sphere
-		for (uint16_t j = 1; j < n - 1; j++)
-		{
-			for (uint16_t i = 0; i < 2 * n; i++)
-			{
+		for (uint16_t j = 1; j < n - 1; j++) {
+			for (uint16_t i = 0; i < 2 * n; i++) {
 				const uint16_t v0 = (j - 1) * p + i;
 				const uint16_t v1 = (j - 1) * p + (i + 1) % p;
 				const uint16_t v2 = j * p + (i + 1) % p;
@@ -896,10 +888,8 @@ namespace tinyrender {
 		ObjectDescriptor planeObject;
 
 		// Vertices
-		for (int i = 0; i < n; i++)
-		{
-			for (int j = 0; j < n; j++)
-			{
+		for (int i = 0; i < n; i++) {
+			for (int j = 0; j < n; j++) {
 				vec3 v = a + vec3({ step.x * i, 0.f, step.z * j });
 				planeObject.vertices.push_back(v);
 				planeObject.normals.push_back({ 0.f, 1.f, 0.f });
@@ -908,10 +898,8 @@ namespace tinyrender {
 		}
 
 		// Triangles
-		for (int i = 0; i < n - 1; i++)
-		{
-			for (int j = 0; j < n - 1; j++)
-			{
+		for (int i = 0; i < n - 1; i++) {
+			for (int j = 0; j < n - 1; j++) {
 				int v0 = (j * n) + i;
 				int v1 = (j * n) + i + 1;
 				int v2 = ((j + 1) * n) + i;
@@ -987,11 +975,6 @@ namespace tinyrender {
 		newObj.triangles.push_back(20); newObj.triangles.push_back(22); newObj.triangles.push_back(23);
 
 		return addObject(newObj);
-	}
-
-
-	void setCameraEye(const vec3& eye) {
-		scene.camera.eye = eye;
 	}
 
 	vec2 getMousePosition() {

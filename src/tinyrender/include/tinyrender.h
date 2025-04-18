@@ -19,7 +19,8 @@
  * -------------------------------
  * tinyrenderwebpu is a minimalist single .h/.cpp viewer based on WebGPU and GLFW with few dependencies.
  * The API is meant to be as simple as possible, with possibly many options not exposed to the user. Feel
- * free to modify it for your own purposes, the set of examples in main.cpp is rather simple.
+ * free to modify it for your own purposes, the set of examples in main.cpp is rather simple. It is meant to
+ * be compatible with both desktop and web applications.
  * 
  * Note: functions marked as internal are not meant to be used outside the renderer. Use at your own risk.
  * Note: the renderer is not meant to be fast or efficient.
@@ -29,7 +30,7 @@
  *
  * Functionalities
  *   -The up direction is (0, 0, 1)
- *   -Internal representation: an object is a triangle mesh
+ *   -Internal representation: an object is a triangle mesh, indexed on 16 bits.
  *   -Scene API: objects can be added, deleted, and modified at runtime. 
  *	  Each object can be translated/rotated/scaled.
  *
@@ -39,11 +40,11 @@
  *   -Zoom using mouse scroll
  *
  * Dependencies (all are included either in CMake or in the source tree)
- *	 -Dear imgui
- *   -WebGPU (Dawn implementation)
- *   -GLFW
- *   -GLM
- *	 -STL
+ *	 - Dear imgui
+ *   - WebGPU (Dawn implementation)
+ *   - GLFW
+ *   - GLM
+ *	 - STL
 */
 
 #pragma once 
@@ -68,17 +69,30 @@ namespace tinyrender {
 		std::vector<uint16_t> triangles;
 	};
 
+	// Public settings struct
+	struct Options {
+		// Camera
+		float zNear = 0.1f, zFar = 500.0f;
+		glm::vec3 eye = glm::vec3(3, -3, 0);
+		glm::vec3 at =  glm::vec3(0, 0, 0);
+		glm::vec3 up =  glm::vec3(0, 0, 1);
+
+		// Mouse 
+		float mouseSensitivity = 0.01f;
+	};
+
 	// Windowing
 	bool init(
 		const char* windowName = "tinyrender", 
-		int width = -1, 
-		int height = -1
+		int width = -1, int height = -1
 	);
 	bool shouldQuit();
 	void update();
 	void render();
 	void swap();
 	void terminate();
+	glm::vec2 getMousePosition();
+	Options& getOptions();
 
 	// Object management
 	uint32_t addObject(
@@ -91,12 +105,6 @@ namespace tinyrender {
 		const glm::vec3& t, 
 		const glm::vec3& r, 
 		const glm::vec3& s
-	);
-
-	// Utilities
-	glm::vec2 getMousePosition();
-	void setCameraEye(
-		const glm::vec3& eye
 	);
 
 	// Primitives

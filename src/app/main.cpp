@@ -2,7 +2,7 @@
 
 void ExampleEmptyWindow() {
 	tinyrender::init("tinyrenderwgpu", 1280, 720);
-	tinyrender::setCameraEye(glm::vec3(0.f, 2.0f, -5.0f));
+	tinyrender::getOptions().eye = glm::vec3(0.f, 1.f, -70.0f);
 	while (!tinyrender::shouldQuit()) {
 		tinyrender::update();
 		tinyrender::render();
@@ -13,7 +13,7 @@ void ExampleEmptyWindow() {
 
 void ExampleSphere() {
 	tinyrender::init("tinyrenderwgpu", 1280, 720);
-	tinyrender::setCameraEye(glm::vec3(0.f, 2.0f, -5.0f));
+	tinyrender::getOptions().eye = glm::vec3(0.f, 1.f, -70.0f);
 	tinyrender::addSphere(1.0f, 16);
 	while (!tinyrender::shouldQuit()) {
 		tinyrender::update();
@@ -25,7 +25,7 @@ void ExampleSphere() {
 
 void ExampleManySpheres() {
 	tinyrender::init("tinyrenderwgpu", 1280, 720);
-	tinyrender::setCameraEye(glm::vec3(0.f, 1.f, -70.0f));
+	tinyrender::getOptions().eye = glm::vec3(0.f, 1.f, -70.0f);
 	for (int i = 0; i < 100; i++) {
 		const float x = float(rand() % 50) - 25.0f;
 		const float y = float(rand() % 50) - 25.0f;
@@ -44,7 +44,7 @@ void ExampleManySpheres() {
 
 void ExampleRotatedBoxes() {
 	tinyrender::init("tinyrenderwgpu", 1280, 720);
-	tinyrender::setCameraEye(glm::vec3(0.f, 1.f, -70.0f));
+	tinyrender::getOptions().eye = glm::vec3(0.f, 1.f, -70.0f);
 	for (int i = 0; i < 100; i++) {
 		const float x = float(rand() % 50) - 25.0f;
 		const float y = float(rand() % 50) - 25.0f;
